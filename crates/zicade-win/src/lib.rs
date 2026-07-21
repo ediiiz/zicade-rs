@@ -26,6 +26,9 @@ pub enum WinError {
     UnsupportedPlatform,
     /// An SSPI/Win32 call failed with the given `SECURITY_STATUS`/`HRESULT` code.
     Sspi(i32),
+    /// A Service Control Manager operation failed; the message names the failing
+    /// call and its Win32/HRESULT code (e.g. access-denied without Administrator).
+    Service(String),
 }
 
 impl fmt::Display for WinError {
@@ -33,6 +36,7 @@ impl fmt::Display for WinError {
         match self {
             WinError::UnsupportedPlatform => write!(f, "unsupported platform (not Windows)"),
             WinError::Sspi(code) => write!(f, "SSPI call failed: 0x{code:08x}"),
+            WinError::Service(msg) => write!(f, "service control manager error: {msg}"),
         }
     }
 }
