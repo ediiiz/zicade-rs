@@ -75,6 +75,36 @@ a browser for the UI.
 
 `%LOCALAPPDATA%\Zicade\config.json` (created with defaults on first run).
 
+## Run as a Windows Service
+
+Zicade can run under the Service Control Manager (SCM) instead of a console.
+Console mode remains the default and is unchanged.
+
+Install, then start (both require an **elevated / Administrator** prompt):
+
+```sh
+zicade service install            # register (auto-start, own-process)
+zicade service install --name MyZicade   # ...under a custom service name
+sc start Zicade                   # start now (or reboot: it is auto-start)
+```
+
+Uninstall:
+
+```sh
+sc stop Zicade                    # optional; stopping maps to graceful shutdown
+zicade service uninstall          # delete the service (add --name to match install)
+```
+
+Notes:
+
+- The installed service runs `zicade service run` from the current executable
+  path and serves the proxy + web UI exactly as console mode does.
+- **Stopping the service** (`sc stop`, `services.msc`, or system shutdown) sends
+  `SERVICE_CONTROL_STOP`/`SHUTDOWN`, which is mapped to the app's existing
+  **graceful shutdown** (in-flight connections drain, same as Ctrl-C).
+- Without Administrator, install/uninstall fail cleanly with an access-denied
+  message (no panic).
+
 ### Config schema (brief)
 
 ```jsonc
@@ -143,6 +173,18 @@ plain-HTTP forwarding, and a soak that holds a flat OS-handle count (no leak).
 The live PAC check is tolerant of hosts with no WPAD/PAC autoconfig (a common
 corporate setup that pushes routing via GPO or a static proxy): it logs a skip
 rather than failing when `WinHttpGetProxyForUrl` reports no discoverable script.
+
+### Service install/uninstall test (gated, elevated)
+
+Creating and deleting a real service needs Administrator and a live SCM, so it
+is gated behind `ZICADE_SERVICE_IT=1` and `#[ignore]`d (the default suite stays
+hermetic and admin-free). From an **elevated** shell:
+
+```sh
+ZICADE_SERVICE_IT=1 cargo test -p zicade-win --test service_it -- --ignored
+```
+
+It installs then immediately deletes a throwaway `ZicadeServiceItTest` service.
 
 ## Known limitations
 
