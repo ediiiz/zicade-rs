@@ -70,9 +70,51 @@ async fn get_config_returns_current() {
     assert_eq!(got, cfg);
 }
 
+/// A config with the WebUI auth gate turned ON.
+fn auth_on() -> Config {
+    let mut cfg = Config::default();
+    cfg.web.auth_required = true;
+    cfg
+}
+
+#[tokio::test]
+async fn put_config_without_token_succeeds_when_auth_off() {
+    // Default config => web.authRequired == false => no token needed.
+    let cfg = Config::default();
+    assert!(!cfg.web.auth_required, "precondition: auth off by default");
+    let state = state_with_config(cfg.clone());
+    let path = state.config_path().to_owned();
+    let config_handle = state.config_arc();
+    let app = router(state);
+
+    let mut new_cfg = cfg.clone();
+    new_cfg.listen.port = 8123;
+    let body = zicade_config::to_json_string(&new_cfg).unwrap();
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/config")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "auth off: PUT must succeed without a token"
+    );
+    assert_eq!(config_handle.lock().unwrap().listen.port, 8123);
+    assert_eq!(load_file(&path).unwrap(), new_cfg);
+}
+
 #[tokio::test]
 async fn put_config_without_token_is_rejected() {
-    let cfg = Config::default();
+    let cfg = auth_on();
     let state = state_with_config(cfg.clone());
     let path = state.config_path().to_owned();
     let app = router(state);
@@ -105,7 +147,7 @@ async fn put_config_without_token_is_rejected() {
 
 #[tokio::test]
 async fn put_config_with_token_persists_and_applies() {
-    let cfg = Config::default();
+    let cfg = auth_on();
     let state = state_with_config(cfg.clone());
     let path = state.config_path().to_owned();
     let config_handle = state.config_arc();
