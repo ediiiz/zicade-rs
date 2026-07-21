@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Zicade pre-commit hook. Install with: scripts/install-hooks.sh
+# Enforces formatting and the per-file size guard cheaply on every commit.
+# (Heavier clippy/test gates run in CI and at milestone boundaries.)
+set -euo pipefail
+
+repo="$(git rev-parse --show-toplevel)"
+
+echo "[pre-commit] cargo fmt --check"
+cargo fmt --check
+
+echo "[pre-commit] file-size guard"
+bash "$repo/scripts/check_file_size.sh"

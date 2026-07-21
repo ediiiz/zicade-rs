@@ -1,5 +1,15 @@
 [build]
 target = "x86_64-pc-windows-gnu"
 
+# w64devkit GNU toolchain. `gcc.exe` is the linker driver, but its helper tools
+# (`ld`, `dlltool`) live in the same bin dir which is NOT on PATH. Rather than
+# depend on PATH (fragile across shells, hooks, and CI), point rustc/gcc at them
+# explicitly here so the build is self-contained:
+#   -B<dir>        : gcc executable search path, so collect2 finds `ld`
+#   -Cdlltool=...  : dlltool rustc uses to build Windows import libraries
 [target.x86_64-pc-windows-gnu]
 linker = "C:/Users/tefenlilioe/tools/w64devkit/bin/gcc.exe"
+rustflags = [
+    "-Clink-arg=-BC:/Users/tefenlilioe/tools/w64devkit/bin",
+    "-Cdlltool=C:/Users/tefenlilioe/tools/w64devkit/bin/dlltool.exe",
+]

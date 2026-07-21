@@ -1,6 +1,37 @@
-[package]
-name = "zicade-rs"
+[workspace]
+resolver = "3"
+members = [
+    "crates/zicade-config",
+    "crates/zicade-routing",
+    "crates/zicade-auth",
+    "crates/zicade-win",
+    "crates/zicade-proxy",
+    "crates/zicade-web",
+    "crates/zicade-observe",
+    "apps/zicade",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
 
-[dependencies]
+# Centralized dependency versions. Individual crates opt in with
+# `<dep>.workspace = true` and pull only what their tests demand (strict TDD).
+[workspace.dependencies]
+windows = "0.59"
+
+# Single lint policy for the whole workspace. Each crate opts in with
+# `[lints] workspace = true`. `cargo clippy -- -D warnings` promotes every
+# `warn` below to a hard error, which is how the complexity guardrails bite.
+[workspace.lints.clippy]
+too_many_lines = "warn"
+cognitive_complexity = "warn"
+too_many_arguments = "warn"
+type_complexity = "warn"
+large_enum_variant = "warn"
+module_inception = "warn"
+
+[workspace.lints.rust]
+unused_must_use = "warn"

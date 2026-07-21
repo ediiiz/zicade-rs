@@ -1,0 +1,21 @@
+[package]
+name = "zicade-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# NOTE: this is the ONLY crate permitted to use `unsafe`/FFI. It does NOT set
+# `#![forbid(unsafe_code)]`. Every other crate does.
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security_Authentication_Identity",
+    "Win32_Security_Credentials",
+] }
+
+[lints]
+workspace = true
