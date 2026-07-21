@@ -282,6 +282,38 @@ async fn get_index_serves_html() {
     assert!(body.contains("Zicade"), "index should mention Zicade");
 }
 
+#[tokio::test]
+async fn serves_embedded_pico_css() {
+    // The UI must be fully self-contained: Pico CSS is vendored and served
+    // same-origin (no external CDN), so index.html can link it locally.
+    let state = state_with_config(Config::default());
+    let app = router(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/assets/pico.min.css")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK, "pico.min.css must be served");
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(ct.starts_with("text/css"), "content-type was {ct}");
+    let body = body_string(resp).await;
+    assert!(!body.is_empty(), "css body must not be empty");
+    assert!(
+        body.contains(":root") || body.contains("--pico"),
+        "served body should be the Pico stylesheet"
+    );
+}
+
 #[test]
 fn parses_config_json_helper_available() {
     // Guards the re-export surface used by callers of the crate.
