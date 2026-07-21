@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zicade — Local Control</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 1.5rem;
+             max-width: 60rem; }
+      h1 { font-size: 1.4rem; }
+      section { margin-bottom: 1.5rem; }
+      textarea { width: 100%; min-height: 14rem; font-family: monospace;
+                 box-sizing: border-box; }
+      input[type="password"] { width: 24rem; max-width: 100%; }
+      button { padding: 0.4rem 0.9rem; cursor: pointer; }
+      #status, #logs { background: rgba(127,127,127,0.12); padding: 0.75rem;
+                       border-radius: 6px; }
+      #logs { height: 16rem; overflow-y: auto; font-family: monospace;
+              font-size: 0.85rem; white-space: pre-wrap; }
+      .row { margin-bottom: 0.6rem; }
+      .ok { color: #2e7d32; } .err { color: #c62828; }
+      .lvl-WARN { color: #b26a00; } .lvl-ERROR { color: #c62828; }
+    </style>
+  </head>
+  <body>
+    <h1>Zicade — Local Control Panel</h1>
+
+    <section>
+      <div class="row">
+        <label>UI token:
+          <input id="token" type="password" placeholder="X-Zicade-Token" />
+        </label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Configuration</h2>
+      <div class="row">
+        <button id="load">Load</button>
+        <button id="save">Save</button>
+        <span id="cfg-msg"></span>
+      </div>
+      <textarea id="config" spellcheck="false"></textarea>
+    </section>
+
+    <section>
+      <h2>Status</h2>
+      <pre id="status">(load to view)</pre>
+    </section>
+
+    <section>
+      <h2>Live logs</h2>
+      <div id="logs"></div>
+    </section>
+
+    <script>
+      // Dependency-free client. Mutations send the token in a custom header;
+      // that requirement is the CSRF defense (cross-site requests cannot set
+      // arbitrary headers).
+      const $ = (id) => document.getElementById(id);
+      const token = () => $("token").value.trim();
+
+      async function loadConfig() {
+        const r = await fetch("/api/config");
+        $("config").value = JSON.stringify(await r.json(), null, 2);
+        msg("cfg-msg", "loaded", true);
+        loadStatus();
+      }
+
+      async function saveConfig() {
+        const r = await fetch("/api/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json",
+                     "X-Zicade-Token": token() },
+          body: $("config").value,
+        });
+        if (r.ok) { msg("cfg-msg", "saved", true); loadStatus(); }
+        else {
+          let detail = r.status;
+          try { detail = (await r.json()).error || detail; } catch (_) {}
+          msg("cfg-msg", "error: " + detail, false);
+        }
+      }
+
+      async function loadStatus() {
+        const r = await fetch("/api/status");
+        $("status").textContent = JSON.stringify(await r.json(), null, 2);
+      }
+
+      function msg(id, text, ok) {
+        const el = $(id);
+        el.textContent = text;
+        el.className = ok ? "ok" : "err";
+      }
+
+      function startLogs() {
+        const box = $("logs");
+        const es = new EventSource("/events/logs");
+        es.onmessage = (e) => {
+          let line = e.data;
+          try {
+            const ev = JSON.parse(e.data);
+            line = `[${ev.level}] ${ev.target}: ${ev.message}`;
+          } catch (_) {}
+          const div = document.createElement("div");
+          div.textContent = line;
+          box.appendChild(div);
+          box.scrollTop = box.scrollHeight;
+        };
+      }
+
+      $("load").addEventListener("click", loadConfig);
+      $("save").addEventListener("click", saveConfig);
+      loadConfig();
+      startLogs();
+    </script>
+  </body>
+</html>
