@@ -20,6 +20,7 @@ rust-version = "1.85"
 # Centralized dependency versions. Individual crates opt in with
 # `<dep>.workspace = true` and pull only what their tests demand (strict TDD).
 [workspace.dependencies]
+anyhow = "1"
 windows = "0.59"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
