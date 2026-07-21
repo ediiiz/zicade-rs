@@ -1,14 +1,18 @@
 #![forbid(unsafe_code)]
 
-//! Routing: `RoutingMode`, the `RouteResolver` and `PacBackend` traits, and
-//! PAC-result parsing. Traits live here so tests inject fakes and the real
-//! WinHTTP backend (in `zicade-win`) is one impl among several. Behavior lands
-//! in M4; M0 only proves the crate compiles.
+//! Routing: the [`PacBackend`] seam, the [`RouteResolver`] that applies PAC
+//! policy, [`RouteDecision`], and PAC-result parsing ([`PacResult`]).
+//!
+//! Traits live here so tests inject fakes ([`FakeBackend`]) and the real
+//! WinHTTP backend (in `zicade-win`) is one impl among several. The parser and
+//! resolver are pure and OS-independent; only the WinHTTP backend touches FFI.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_scaffold_compiles() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+mod error;
+mod fake;
+mod pac;
+mod resolver;
+
+pub use error::RoutingError;
+pub use fake::FakeBackend;
+pub use pac::PacResult;
+pub use resolver::{PacBackend, RouteDecision, RouteResolver};

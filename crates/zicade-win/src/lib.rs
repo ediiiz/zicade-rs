@@ -12,8 +12,10 @@
 use std::fmt;
 
 mod sspi;
+mod winhttp;
 
 pub use sspi::{LoopbackReport, SspiNegotiate, run_loopback_handshake};
+pub use winhttp::WinHttpPacBackend;
 
 /// Error returned by platform integration points.
 #[derive(Debug, Clone, PartialEq, Eq)]
