@@ -9,7 +9,9 @@ mod http_forward;
 mod metrics;
 mod server;
 mod tunnel;
+mod upstream;
 
 pub use error::ProxyError;
 pub use metrics::ProxyMetrics;
 pub use server::ProxyServer;
+pub use upstream::{AuthFactory, Routing, UpstreamAuth, UpstreamTarget};

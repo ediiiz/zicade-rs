@@ -10,6 +10,7 @@ use tokio::task::JoinSet;
 use crate::error::ProxyError;
 use crate::http_forward::handle_connection;
 use crate::metrics::ProxyMetrics;
+use crate::upstream::Routing;
 
 /// Default bound on how long graceful shutdown waits for in-flight connections
 /// to drain before aborting stragglers.
@@ -22,6 +23,7 @@ pub struct ProxyServer {
     local_addr: SocketAddr,
     metrics: ProxyMetrics,
     shutdown_timeout: Duration,
+    routing: Routing,
 }
 
 impl ProxyServer {
@@ -37,6 +39,7 @@ impl ProxyServer {
             local_addr,
             metrics: ProxyMetrics::default(),
             shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
+            routing: Routing::Direct,
         })
     }
 
@@ -44,6 +47,14 @@ impl ProxyServer {
     #[must_use]
     pub fn with_shutdown_timeout(mut self, timeout: Duration) -> Self {
         self.shutdown_timeout = timeout;
+        self
+    }
+
+    /// Select the routing mode (direct, or through a configured upstream proxy).
+    /// Defaults to [`Routing::Direct`], preserving M2 behavior.
+    #[must_use]
+    pub fn with_routing(mut self, routing: Routing) -> Self {
+        self.routing = routing;
         self
     }
 
@@ -73,7 +84,8 @@ impl ProxyServer {
                 accepted = self.listener.accept() => {
                     if let Ok((stream, _peer)) = accepted {
                         let metrics = self.metrics.clone();
-                        conns.spawn(handle_connection(stream, metrics));
+                        let routing = self.routing.clone();
+                        conns.spawn(handle_connection(stream, metrics, routing));
                     }
                     // Transient accept errors are ignored; the loop continues.
                 }

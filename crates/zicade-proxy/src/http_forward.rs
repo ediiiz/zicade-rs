@@ -14,18 +14,20 @@ use tokio::net::TcpStream;
 
 use crate::metrics::ProxyMetrics;
 use crate::tunnel;
+use crate::upstream::{self, Routing, UpstreamTarget};
 
-type BoxedBody = BoxBody<Bytes, hyper::Error>;
-type ForwardError = Box<dyn std::error::Error + Send + Sync>;
+pub(crate) type BoxedBody = BoxBody<Bytes, hyper::Error>;
+pub(crate) type ForwardError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Serve a single accepted connection. The connection guard is held for the
 /// lifetime of the connection and released on drop (even on error/panic).
-pub(crate) async fn handle_connection(stream: TcpStream, metrics: ProxyMetrics) {
+pub(crate) async fn handle_connection(stream: TcpStream, metrics: ProxyMetrics, routing: Routing) {
     let _guard = metrics.connection_guard();
     let io = TokioIo::new(stream);
     let service = service_fn(move |req| {
         let metrics = metrics.clone();
-        async move { Ok::<_, hyper::Error>(proxy_service(req, metrics).await) }
+        let routing = routing.clone();
+        async move { Ok::<_, hyper::Error>(proxy_service(req, metrics, routing).await) }
     });
 
     // Per-connection isolation: a connection-level error is logged and dropped;
@@ -36,18 +38,60 @@ pub(crate) async fn handle_connection(stream: TcpStream, metrics: ProxyMetrics) 
         .await;
 }
 
-async fn proxy_service(req: Request<Incoming>, metrics: ProxyMetrics) -> Response<BoxedBody> {
+async fn proxy_service(
+    req: Request<Incoming>,
+    metrics: ProxyMetrics,
+    routing: Routing,
+) -> Response<BoxedBody> {
     if req.method() == Method::CONNECT {
-        return handle_connect(req);
+        return match &routing {
+            Routing::Direct => handle_connect(req),
+            Routing::Upstream(target) => handle_connect_upstream(req, target).await,
+        };
     }
     metrics.incr_request();
-    match forward_http(req).await {
+    let result = match &routing {
+        Routing::Direct => forward_http(req).await,
+        Routing::Upstream(target) => {
+            upstream::forward_via_upstream(&target.addr, req, &target.auth).await
+        }
+    };
+    match result {
         Ok(resp) => resp,
         Err(err) => {
             tracing::warn!(error = %err, "http forward failed");
             error_response(StatusCode::BAD_GATEWAY)
         }
     }
+}
+
+/// Upstream-mode `CONNECT`: establish an authenticated tunnel to the target
+/// *through* the upstream proxy first, and only then reply 200 and splice.
+async fn handle_connect_upstream(
+    req: Request<Incoming>,
+    target: &UpstreamTarget,
+) -> Response<BoxedBody> {
+    let Some(dst) = authority_target(req.uri()) else {
+        return error_response(StatusCode::BAD_REQUEST);
+    };
+    let peer = match upstream::connect_via_upstream(&target.addr, &dst, &target.auth).await {
+        Ok(peer) => peer,
+        Err(err) => {
+            tracing::warn!(error = %err, dst, "upstream CONNECT failed");
+            return error_response(StatusCode::BAD_GATEWAY);
+        }
+    };
+    tokio::spawn(async move {
+        match hyper::upgrade::on(req).await {
+            Ok(upgraded) => {
+                if let Err(err) = tunnel::splice(upgraded, peer).await {
+                    tracing::debug!(error = %err, dst, "upstream tunnel closed with error");
+                }
+            }
+            Err(err) => tracing::warn!(error = %err, "CONNECT upgrade failed"),
+        }
+    });
+    Response::new(empty_body())
 }
 
 /// On `CONNECT host:port`, reply 200 and splice the upgraded connection to the
