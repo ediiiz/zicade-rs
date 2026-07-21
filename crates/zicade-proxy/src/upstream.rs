@@ -263,6 +263,23 @@ fn connect_request(target: &str, auth_header: Option<&str>) -> String {
 
 /// Forward a plain HTTP request through the upstream proxy (absolute-form),
 /// completing the Negotiate handshake, and return the final response.
+///
+/// Each call opens a **fresh** upstream `TcpStream` and runs the full multi-leg
+/// auth handshake, then drops the stream when the response is buffered. This is
+/// an intentional, correct, leak-free choice — not an oversight (Issue #5):
+///
+/// - Negotiate/NTLM authenticates the *TCP connection*, not the request, so one
+///   authenticator/credential-handle lifecycle maps cleanly to one connection.
+/// - The per-request connect/auth/teardown holds a flat OS-handle steady state
+///   (LESSON-7); the RAII drop here is what guarantees that. See the
+///   `forward_burst_drains_connections_and_holds_handle_count` regression test.
+///
+/// Reusing an authenticated upstream stream across requests on the same client
+/// keep-alive connection would save the handshake cost, but it is **deliberately
+/// deferred**: it needs per-client-connection stream state with interior
+/// mutability, mid-reuse reconnect/re-auth on upstream close, and careful keep-
+/// alive framing — meaningful complexity with real risk to the leak-free
+/// guarantee, for a latency win that does not outweigh it here.
 pub(crate) async fn forward_via_upstream(
     upstream_addr: &str,
     req: Request<Incoming>,

@@ -153,6 +153,17 @@ rather than failing when `WinHttpGetProxyForUrl` reports no discoverable script.
   `"file"`) to point at the PAC explicitly. `failPolicy` governs resolution
   failures: `"direct"` falls back to a DIRECT connection, `"error"` fails the
   request with `502`. PAC results are not cached (each request re-resolves).
+- **Upstream connections are authenticated per request, not pooled.** Because
+  Negotiate/NTLM authenticates the TCP connection (not the request), each
+  HTTP-forward request opens a fresh upstream connection, completes the multi-leg
+  407 handshake, and tears it down. This is an intentional, correct, leak-free
+  design (LESSON-7): the per-request connect/auth/teardown holds a flat OS-handle
+  steady state, locked in by regression tests. Reusing an authenticated upstream
+  connection across requests on the same client keep-alive connection would save
+  the handshake cost, but is **deliberately deferred** — it adds per-connection
+  stream state, mid-reuse reconnect/re-auth, and keep-alive framing complexity
+  with real risk to the handle-stability guarantee, for a latency win that does
+  not justify it. `CONNECT` tunnels are inherently per-connection and unaffected.
 - **Basic upstream auth is not wired.** `auth.mode = "basic"` currently logs a
   warning and proceeds **without** proxy authentication. Use `negotiate` (or
   `none`). `none` and `negotiate` are fully wired.
