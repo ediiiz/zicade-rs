@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Zicade — Local Control</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg" />
     <!-- Vendored Pico CSS v2.1.1, embedded and served same-origin. No CDN. -->
     <link rel="stylesheet" href="/assets/pico.min.css" />
     <style>
@@ -21,12 +22,14 @@
       .lvl-WARN { color: #b26a00; }
       .lvl-ERROR, .lvl-FATAL { color: var(--pico-del-color); }
       [hidden] { display: none !important; }
+      .brand { display: inline-flex; align-items: center; gap: 0.5rem; }
+      .brand img { width: 1.6rem; height: 1.6rem; display: block; }
     </style>
   </head>
   <body>
     <main class="container">
       <nav>
-        <ul><li><strong>Zicade</strong> — Local Control Panel</li></ul>
+        <ul><li class="brand"><img src="/assets/logo.svg" alt="" /><strong>Zicade</strong> — Local Control Panel</li></ul>
         <ul>
           <li>
             <label class="muted">

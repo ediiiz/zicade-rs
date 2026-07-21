@@ -36,3 +36,6 @@ zicade-win = { path = "../../crates/zicade-win" }
 
 [lints]
 workspace = true
+
+[build-dependencies]
+embed-resource = "3.0.11"
