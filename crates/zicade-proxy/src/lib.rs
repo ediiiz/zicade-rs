@@ -1,13 +1,15 @@
 #![forbid(unsafe_code)]
 
-//! The proxy data path: accept loop, HTTP forwarding, and `CONNECT` tunneling,
-//! with per-connection isolation and graceful shutdown. Behavior lands in M2;
-//! M0 only proves the crate compiles.
+//! The proxy data path: accept loop, HTTP forwarding (absolute-form →
+//! origin-form), and `CONNECT` tunneling, with per-connection isolation and
+//! graceful shutdown. M2 implements direct mode against fake origins.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_scaffold_compiles() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+mod error;
+mod http_forward;
+mod metrics;
+mod server;
+mod tunnel;
+
+pub use error::ProxyError;
+pub use metrics::ProxyMetrics;
+pub use server::ProxyServer;
