@@ -135,7 +135,14 @@ domain-joined Windows machine, on the corporate network, pointing at the real
 ZICADE_LIVE_PROXY=1 cargo test
 ```
 
-Run these only on-corp; off-target they are skipped.
+Run these only on-corp; off-target they are skipped. Verified green against the
+real Skyhigh/McAfee Secure Web Gateway at `wp8080:8080`: the multi-leg
+`407 -> NTLM -> 200` handshake, HTTPS via `CONNECT` through the gateway,
+plain-HTTP forwarding, and a soak that holds a flat OS-handle count (no leak).
+
+The live PAC check is tolerant of hosts with no WPAD/PAC autoconfig (a common
+corporate setup that pushes routing via GPO or a static proxy): it logs a skip
+rather than failing when `WinHttpGetProxyForUrl` reports no discoverable script.
 
 ## Known limitations
 
@@ -150,4 +157,12 @@ Run these only on-corp; off-target they are skipped.
 - **`negotiate` is Windows-only.** Off-Windows, config validation rejects it; if
   a Negotiate authenticator is somehow constructed off-target, it errors at
   handshake time rather than at startup.
-```
+- **`negotiate` uses the NTLM SSPI package, not SPNEGO/Kerberos.** The target
+  corporate gateway (Skyhigh/McAfee) offers `Negotiate`/`NTLM`/`Basic` but does
+  not accept SPNEGO, and has no Kerberos SPN for the proxy appliance. The SSPI
+  `Negotiate` package's raw-NTLM fallback also cannot complete against it
+  (`SEC_E_INVALID_TOKEN` on the challenge leg). We therefore acquire the SSPI
+  credential with the **NTLM** package, which completes the standard three-leg
+  NTLM handshake; the gateway accepts the token under the `Negotiate` scheme.
+  Environments that require Kerberos SSO would need this package made
+  configurable.
