@@ -6,6 +6,22 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+axum = { workspace = true }
+rust-embed = { workspace = true }
+rand = { workspace = true }
+zicade-config = { path = "../zicade-config" }
+zicade-observe = { path = "../zicade-observe" }
+
+[dev-dependencies]
+tower = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
 
 [lints]
 workspace = true
