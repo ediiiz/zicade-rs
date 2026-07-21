@@ -15,14 +15,17 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::Context as _;
-use zicade::cli::{Command, DEFAULT_SERVICE_NAME, parse_args};
+use zicade::cli::{Command, DEFAULT_SERVICE_NAME, LaunchMode, launch_mode, parse_args};
 use zicade::{LOG_BUFFER_CAP, init_tracing};
 use zicade_config::Config;
 use zicade_observe::channel_layer;
 
+mod tray;
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match parse_args(&args) {
+        Command::Default => run_default(),
         Command::Run { config_path } => run_console(config_path),
         Command::ServiceRun => run_service(),
         Command::ServiceInstall { name } => install_service(name),
@@ -36,6 +39,18 @@ fn main() -> ExitCode {
             print_usage();
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The no-subcommand default (bare `zicade`). Branch on the double-click
+/// heuristic: a freshly-created console we alone own (`GetConsoleProcessList`
+/// == 1) means the exe was double-clicked, so run in the tray; otherwise this
+/// was launched from a terminal, so serve in the console as before.
+fn run_default() -> ExitCode {
+    let count = zicade_win::tray::console_process_count();
+    match launch_mode(count, &Command::Default) {
+        LaunchMode::Tray => tray::run_tray_mode(),
+        LaunchMode::Console => run_console(None),
     }
 }
 
