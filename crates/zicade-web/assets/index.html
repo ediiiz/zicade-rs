@@ -4,114 +4,351 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Zicade — Local Control</title>
+    <!-- Vendored Pico CSS v2.1.1, embedded and served same-origin. No CDN. -->
+    <link rel="stylesheet" href="/assets/pico.min.css" />
     <style>
-      :root { color-scheme: light dark; }
-      body { font-family: system-ui, sans-serif; margin: 0; padding: 1.5rem;
-             max-width: 60rem; }
-      h1 { font-size: 1.4rem; }
-      section { margin-bottom: 1.5rem; }
-      textarea { width: 100%; min-height: 14rem; font-family: monospace;
-                 box-sizing: border-box; }
-      input[type="password"] { width: 24rem; max-width: 100%; }
-      button { padding: 0.4rem 0.9rem; cursor: pointer; }
-      #status, #logs { background: rgba(127,127,127,0.12); padding: 0.75rem;
-                       border-radius: 6px; }
-      #logs { height: 16rem; overflow-y: auto; font-family: monospace;
-              font-size: 0.85rem; white-space: pre-wrap; }
-      .row { margin-bottom: 0.6rem; }
-      .ok { color: #2e7d32; } .err { color: #c62828; }
-      .lvl-WARN { color: #b26a00; } .lvl-ERROR { color: #c62828; }
+      :root { --pico-form-element-spacing-vertical: 0.5rem; }
+      body { padding-block: 1rem; }
+      .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+      @media (max-width: 40rem) { .grid-2 { grid-template-columns: 1fr; } }
+      .muted { color: var(--pico-muted-color); font-size: 0.85rem; }
+      #cfg-msg.ok { color: var(--pico-ins-color); }
+      #cfg-msg.err { color: var(--pico-del-color); }
+      #logs {
+        height: 16rem; overflow-y: auto; font-family: var(--pico-font-family-monospace);
+        font-size: 0.8rem; white-space: pre-wrap; margin: 0;
+      }
+      .lvl-WARN { color: #b26a00; }
+      .lvl-ERROR, .lvl-FATAL { color: var(--pico-del-color); }
+      [hidden] { display: none !important; }
     </style>
   </head>
   <body>
-    <h1>Zicade — Local Control Panel</h1>
+    <main class="container">
+      <nav>
+        <ul><li><strong>Zicade</strong> — Local Control Panel</li></ul>
+        <ul>
+          <li>
+            <label class="muted">
+              UI token
+              <input id="token" type="password" placeholder="X-Zicade-Token"
+                     autocomplete="off" />
+            </label>
+          </li>
+        </ul>
+      </nav>
+      <p class="muted">
+        Auth is off by default (loopback-only). A token is only required when
+        <code>web.authRequired</code> is enabled below.
+      </p>
 
-    <section>
-      <div class="row">
-        <label>UI token:
-          <input id="token" type="password" placeholder="X-Zicade-Token" />
-        </label>
-      </div>
-    </section>
+      <article>
+        <header><strong>Configuration</strong></header>
+        <form id="config-form">
+          <fieldset>
+            <legend>Listen</legend>
+            <div class="grid-2">
+              <label>Host
+                <input data-field="listen.host" name="listen.host" type="text"
+                       placeholder="127.0.0.1" />
+              </label>
+              <label>Port
+                <input data-field="listen.port" name="listen.port" type="number"
+                       min="1" max="65535" placeholder="3129" />
+              </label>
+            </div>
+          </fieldset>
 
-    <section>
-      <h2>Configuration</h2>
-      <div class="row">
-        <button id="load">Load</button>
-        <button id="save">Save</button>
-        <span id="cfg-msg"></span>
-      </div>
-      <textarea id="config" spellcheck="false"></textarea>
-    </section>
+          <fieldset>
+            <legend>Routing</legend>
+            <label>Mode
+              <select data-field="routing.mode" name="routing.mode" id="routing-mode">
+                <option value="direct">direct</option>
+                <option value="upstream">upstream</option>
+                <option value="pac">pac</option>
+              </select>
+            </label>
 
-    <section>
-      <h2>Status</h2>
-      <pre id="status">(load to view)</pre>
-    </section>
+            <fieldset class="section-upstream" hidden>
+              <legend>Upstream proxy</legend>
+              <div class="grid-2">
+                <label>Host
+                  <input data-field="upstream.host" name="upstream.host" type="text"
+                         placeholder="proxy.example.com" />
+                </label>
+                <label>Port
+                  <input data-field="upstream.port" name="upstream.port" type="number"
+                         min="1" max="65535" placeholder="8080" />
+                </label>
+              </div>
+              <div class="grid-2">
+                <label>Auth mode
+                  <select data-field="upstream.auth.mode" name="upstream.auth.mode">
+                    <option value="none">none</option>
+                    <option value="basic">basic</option>
+                    <option value="negotiate">negotiate</option>
+                  </select>
+                </label>
+                <label>SSPI package
+                  <select data-field="upstream.auth.package" name="upstream.auth.package">
+                    <option value="ntlm">ntlm</option>
+                    <option value="negotiate">negotiate</option>
+                  </select>
+                </label>
+              </div>
+              <div class="grid-2">
+                <label>Username
+                  <input data-field="upstream.auth.username" name="upstream.auth.username"
+                         type="text" autocomplete="off" />
+                </label>
+                <label>Password
+                  <input data-field="upstream.auth.password" name="upstream.auth.password"
+                         type="password" autocomplete="off" />
+                </label>
+              </div>
+            </fieldset>
 
-    <section>
-      <h2>Live logs</h2>
-      <div id="logs"></div>
-    </section>
+            <fieldset class="section-pac" hidden>
+              <legend>PAC</legend>
+              <div class="grid-2">
+                <label>Source
+                  <select data-field="pac.source" name="pac.source">
+                    <option value="auto">auto</option>
+                    <option value="file">file</option>
+                    <option value="url">url</option>
+                  </select>
+                </label>
+                <label>Fail policy
+                  <select data-field="pac.failPolicy" name="pac.failPolicy">
+                    <option value="error">error</option>
+                    <option value="direct">direct</option>
+                  </select>
+                </label>
+              </div>
+              <div class="grid-2">
+                <label>File path
+                  <input data-field="pac.path" name="pac.path" type="text"
+                         placeholder="C:\\path\\to\\proxy.pac" />
+                </label>
+                <label>URL
+                  <input data-field="pac.url" name="pac.url" type="text"
+                         placeholder="wpad/wpad.dat" />
+                </label>
+              </div>
+              <label>Auth mode
+                <select data-field="pac.auth.mode" name="pac.auth.mode">
+                  <option value="none">none</option>
+                  <option value="basic">basic</option>
+                  <option value="negotiate">negotiate</option>
+                </select>
+              </label>
+            </fieldset>
+          </fieldset>
+
+          <fieldset>
+            <legend>Logging</legend>
+            <div class="grid-2">
+              <label>Level
+                <select data-field="logging.level" name="logging.level">
+                  <option value="trace">trace</option>
+                  <option value="debug">debug</option>
+                  <option value="info">info</option>
+                  <option value="warn">warn</option>
+                  <option value="error">error</option>
+                </select>
+              </label>
+              <label>Format
+                <select data-field="logging.format" name="logging.format">
+                  <option value="json">json</option>
+                  <option value="text">text</option>
+                  <option value="pretty">pretty</option>
+                </select>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Web UI</legend>
+            <label>
+              <input data-field="web.authRequired" name="web.authRequired"
+                     type="checkbox" role="switch" />
+              Require <code>X-Zicade-Token</code> on mutations (auth)
+            </label>
+            <small class="muted">
+              Off by default — the UI is loopback-only. Enable to require the
+              token (which also serves as CSRF protection).
+            </small>
+          </fieldset>
+
+          <div role="group">
+            <button type="button" id="load" class="secondary">Reload</button>
+            <button type="submit" id="save">Save configuration</button>
+          </div>
+          <p id="cfg-msg" class="muted" aria-live="polite"></p>
+        </form>
+      </article>
+
+      <article>
+        <header><strong>Status</strong></header>
+        <pre id="status">(loading…)</pre>
+      </article>
+
+      <article>
+        <header><strong>Live logs</strong></header>
+        <pre id="logs"></pre>
+      </article>
+    </main>
 
     <script>
-      // Dependency-free client. Mutations send the token in a custom header;
+      // Dependency-free client. Every input carries a data-field with its dotted
+      // config path; collect() rebuilds the exact JSON schema the backend
+      // validates. Mutations send the token in a custom header when auth is on;
       // that requirement is the CSRF defense (cross-site requests cannot set
       // arbitrary headers).
-      const $ = (id) => document.getElementById(id);
-      const token = () => $("token").value.trim();
+      const $ = (sel) => document.querySelector(sel);
+      const fieldEl = (path) => document.querySelector(`[data-field="${path}"]`);
+      const token = () => $("#token").value.trim();
 
-      async function loadConfig() {
-        const r = await fetch("/api/config");
-        $("config").value = JSON.stringify(await r.json(), null, 2);
-        msg("cfg-msg", "loaded", true);
-        loadStatus();
+      function getStr(path) { const e = fieldEl(path); return e ? e.value.trim() : ""; }
+      function getBool(path) { const e = fieldEl(path); return !!(e && e.checked); }
+      function getPort(path) {
+        const n = parseInt(getStr(path), 10);
+        return Number.isFinite(n) ? n : 0;
       }
 
-      async function saveConfig() {
-        const r = await fetch("/api/config", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json",
-                     "X-Zicade-Token": token() },
-          body: $("config").value,
-        });
-        if (r.ok) { msg("cfg-msg", "saved", true); loadStatus(); }
-        else {
-          let detail = r.status;
-          try { detail = (await r.json()).error || detail; } catch (_) {}
-          msg("cfg-msg", "error: " + detail, false);
+      function setStr(path, v) {
+        const e = fieldEl(path);
+        if (!e) return;
+        v = v == null ? "" : String(v);
+        if (e.tagName === "SELECT" && v && ![...e.options].some((o) => o.value === v)) {
+          e.add(new Option(v, v));
         }
+        e.value = v;
+      }
+      function setBool(path, v) { const e = fieldEl(path); if (e) e.checked = !!v; }
+
+      function toggleSections() {
+        const mode = getStr("routing.mode");
+        $(".section-upstream").hidden = mode !== "upstream";
+        $(".section-pac").hidden = mode !== "pac";
       }
 
-      async function loadStatus() {
-        const r = await fetch("/api/status");
-        $("status").textContent = JSON.stringify(await r.json(), null, 2);
+      // Build the config JSON from the form. Optional sections/fields are only
+      // included when relevant, matching the backend's skip_serializing_if.
+      function collect() {
+        const mode = getStr("routing.mode");
+        const cfg = {
+          listen: { host: getStr("listen.host"), port: getPort("listen.port") },
+          routing: { mode },
+          logging: { level: getStr("logging.level"), format: getStr("logging.format") },
+          web: { authRequired: getBool("web.authRequired") },
+        };
+        if (mode === "upstream") {
+          const auth = { mode: getStr("upstream.auth.mode"),
+                         package: getStr("upstream.auth.package") };
+          const u = getStr("upstream.auth.username");
+          const p = getStr("upstream.auth.password");
+          if (u) auth.username = u;
+          if (p) auth.password = p;
+          cfg.routing.upstream = {
+            host: getStr("upstream.host"), port: getPort("upstream.port"), auth,
+          };
+        }
+        if (mode === "pac") {
+          const pac = { source: getStr("pac.source"),
+                        failPolicy: getStr("pac.failPolicy"),
+                        auth: { mode: getStr("pac.auth.mode") } };
+          const path = getStr("pac.path");
+          const url = getStr("pac.url");
+          if (path) pac.path = path;
+          if (url) pac.url = url;
+          cfg.routing.pac = pac;
+        }
+        return cfg;
       }
 
-      function msg(id, text, ok) {
-        const el = $(id);
+      function populate(cfg) {
+        setStr("listen.host", cfg.listen?.host ?? "127.0.0.1");
+        setStr("listen.port", cfg.listen?.port ?? 3129);
+        setStr("routing.mode", cfg.routing?.mode ?? "direct");
+        const up = cfg.routing?.upstream ?? {};
+        setStr("upstream.host", up.host ?? "");
+        setStr("upstream.port", up.port ?? "");
+        setStr("upstream.auth.mode", up.auth?.mode ?? "none");
+        setStr("upstream.auth.package", up.auth?.package ?? "ntlm");
+        setStr("upstream.auth.username", up.auth?.username ?? "");
+        setStr("upstream.auth.password", up.auth?.password ?? "");
+        const pac = cfg.routing?.pac ?? {};
+        setStr("pac.source", pac.source ?? "auto");
+        setStr("pac.path", pac.path ?? "");
+        setStr("pac.url", pac.url ?? "");
+        setStr("pac.failPolicy", pac.failPolicy ?? "error");
+        setStr("pac.auth.mode", pac.auth?.mode ?? "none");
+        setStr("logging.level", cfg.logging?.level ?? "info");
+        setStr("logging.format", cfg.logging?.format ?? "json");
+        setBool("web.authRequired", cfg.web?.authRequired ?? false);
+        toggleSections();
+      }
+
+      function msg(text, ok) {
+        const el = $("#cfg-msg");
         el.textContent = text;
         el.className = ok ? "ok" : "err";
       }
 
+      async function loadConfig() {
+        try {
+          const r = await fetch("/api/config");
+          populate(await r.json());
+          msg("Loaded current configuration.", true);
+          loadStatus();
+        } catch (e) { msg("Failed to load config: " + e, false); }
+      }
+
+      async function saveConfig(ev) {
+        ev.preventDefault();
+        const headers = { "Content-Type": "application/json" };
+        const t = token();
+        if (t) headers["X-Zicade-Token"] = t;
+        const r = await fetch("/api/config", {
+          method: "PUT", headers, body: JSON.stringify(collect()),
+        });
+        if (r.ok) { msg("Configuration saved.", true); loadStatus(); }
+        else {
+          let detail = r.status;
+          try { detail = (await r.json()).error || detail; } catch (_) {}
+          msg("Error: " + detail, false);
+        }
+      }
+
+      async function loadStatus() {
+        try {
+          const r = await fetch("/api/status");
+          $("#status").textContent = JSON.stringify(await r.json(), null, 2);
+        } catch (e) { $("#status").textContent = "(status unavailable)"; }
+      }
+
       function startLogs() {
-        const box = $("logs");
+        const box = $("#logs");
         const es = new EventSource("/events/logs");
         es.onmessage = (e) => {
-          let line = e.data;
+          let line = e.data, level = "";
           try {
             const ev = JSON.parse(e.data);
+            level = ev.level || "";
             line = `[${ev.level}] ${ev.target}: ${ev.message}`;
           } catch (_) {}
           const div = document.createElement("div");
           div.textContent = line;
+          if (level) div.className = "lvl-" + level;
           box.appendChild(div);
           box.scrollTop = box.scrollHeight;
         };
       }
 
-      $("load").addEventListener("click", loadConfig);
-      $("save").addEventListener("click", saveConfig);
+      $("#routing-mode").addEventListener("change", toggleSections);
+      $("#load").addEventListener("click", loadConfig);
+      $("#config-form").addEventListener("submit", saveConfig);
       loadConfig();
       startLogs();
     </script>
