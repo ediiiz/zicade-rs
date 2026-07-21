@@ -2,10 +2,8 @@
 //!
 //! Direct is a straight pass-through. Upstream builds an [`UpstreamTarget`],
 //! mapping the auth mode onto the proxy's [`UpstreamAuth`] (Negotiate wires a
-//! per-connection SSPI authenticator factory). PAC is a documented known
-//! limitation for M6: the [`RouteResolver`] is constructed and validated, but
-//! per-request PAC routing is not yet wired into the data path, so the proxy
-//! runs Direct.
+//! per-connection SSPI authenticator factory). PAC per-request routing lives in
+//! [`crate::pac_router`], which injects a `PacRouter` closure backed by WinHTTP.
 
 use std::sync::Arc;
 
@@ -14,15 +12,14 @@ use zicade_auth::header::build_basic_authorization;
 use zicade_auth::{AuthError, UpstreamAuthenticator};
 use zicade_config::{AuthConfig, AuthMode, Config, RoutingMode};
 use zicade_proxy::{AuthFactory, Routing, UpstreamAuth, UpstreamTarget};
-use zicade_routing::RouteResolver;
-use zicade_win::{SspiNegotiate, WinHttpPacBackend};
+use zicade_win::SspiNegotiate;
 
 /// Build the proxy [`Routing`] for the given config.
 pub fn build_routing(config: &Config) -> anyhow::Result<Routing> {
     match config.routing.mode {
         RoutingMode::Direct => Ok(Routing::Direct),
         RoutingMode::Upstream => build_upstream(config),
-        RoutingMode::Pac => build_pac(config),
+        RoutingMode::Pac => crate::pac_router::build_pac(config),
     }
 }
 
@@ -38,32 +35,10 @@ fn build_upstream(config: &Config) -> anyhow::Result<Routing> {
     Ok(Routing::Upstream(UpstreamTarget { addr, auth }))
 }
 
-/// PAC mode: construct + validate the resolver, then fall back to Direct in the
-/// data path (documented M6 limitation).
-fn build_pac(config: &Config) -> anyhow::Result<Routing> {
-    let pac = config
-        .routing
-        .pac
-        .as_ref()
-        .context("routing.mode = pac requires a [routing.pac] section")?;
-    match WinHttpPacBackend::new() {
-        Ok(backend) => {
-            let _resolver = RouteResolver::new(pac.clone(), backend);
-            tracing::warn!(
-                "PAC routing is configured and the WinHTTP resolver was built, but \
-                 per-request PAC routing is not yet wired into the proxy data path; \
-                 running Direct (known limitation)"
-            );
-        }
-        Err(err) => {
-            tracing::warn!(%err, "could not open the WinHTTP PAC backend; running Direct");
-        }
-    }
-    Ok(Routing::Direct)
-}
-
-/// Map an [`AuthConfig`] onto the proxy's [`UpstreamAuth`].
-fn build_auth(auth: &AuthConfig, host: &str) -> UpstreamAuth {
+/// Map an [`AuthConfig`] onto the proxy's [`UpstreamAuth`]. `host` is the proxy
+/// host used to derive the Negotiate SPN (`HTTP/<host>`); for PAC this is the
+/// RESOLVED proxy host (LESSON-6).
+pub(crate) fn build_auth(auth: &AuthConfig, host: &str) -> UpstreamAuth {
     match auth.mode {
         AuthMode::None => UpstreamAuth::None,
         AuthMode::Basic => {
