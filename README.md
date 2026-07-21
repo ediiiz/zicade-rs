@@ -138,13 +138,38 @@ requires a username, and `negotiate` auth is only accepted on Windows.
 ## Web UI
 
 - **URL:** `http://127.0.0.1:3130/` (proxy port + 1).
+- A clean, theme-aware control panel (vendored [Pico CSS] v2.1.1, embedded and
+  served same-origin — **no external CDN**, so it works fully offline). The form
+  exposes **every** config field (listen, routing mode, upstream + its auth, PAC
+  + its auth, logging, and the web-auth toggle); the upstream/PAC subsections
+  show or hide based on the selected routing mode. Edits are serialized back to
+  the same JSON schema the backend validates, so invalid input returns a `4xx`
+  shown inline.
 - **Read-only** endpoints (`GET /api/config`, `GET /api/status`,
   `GET /events/logs` SSE) are open on loopback.
-- **Mutations** (`PUT /api/config`) require the local UI token in the
-  `X-Zicade-Token` header. That custom-header requirement doubles as CSRF
-  protection.
+
+### Web-UI auth (`web.authRequired`, default **off**)
+
+- **Mutations** (`PUT /api/config`) are gated by the `web.authRequired` flag in
+  the config's `web` section:
+
+  ```json
+  "web": { "authRequired": false }
+  ```
+
+- **Default `false`** — auth is normally unneeded because the web server binds
+  to loopback (`127.0.0.1`) only, so nothing off-box can reach it. Configs
+  without a `web` section still load and default to off.
+- Set **`web.authRequired = true`** to require the local UI token in the
+  `X-Zicade-Token` header on every mutation (missing/wrong token → `401`). That
+  custom-header requirement also doubles as CSRF protection (a cross-site
+  request cannot set an arbitrary header). Read-only endpoints stay open on
+  loopback either way.
 - **Token file:** `%LOCALAPPDATA%\Zicade\ui-token`, created on first run
-  (32 hex chars). Read it from that file and send it as `X-Zicade-Token`.
+  (32 hex chars). When auth is on, read it from that file and send it as
+  `X-Zicade-Token` (the UI has a token field for this).
+
+[Pico CSS]: https://picocss.com
 
 ## Testing
 
