@@ -112,6 +112,56 @@ Connection: keep-alive\r\n\r\n"
     }
 }
 
+/// A scripted authenticator that never runs out of tokens, so the *proxy's*
+/// leg cap (not the authenticator) is what bounds a looping handshake.
+struct InfiniteAuth {
+    next: usize,
+}
+
+impl UpstreamAuthenticator for InfiniteAuth {
+    fn step(&mut self, _challenge: Option<&[u8]>) -> Result<Vec<u8>, AuthError> {
+        let token = format!("tok{}", self.next).into_bytes();
+        self.next += 1;
+        Ok(token)
+    }
+}
+
+/// An [`AuthFactory`] whose authenticator answers every challenge, used to prove
+/// the proxy caps handshake legs on its own.
+pub fn infinite_negotiate_factory() -> UpstreamAuth {
+    let factory: AuthFactory =
+        Arc::new(|| Box::new(InfiniteAuth { next: 0 }) as Box<dyn UpstreamAuthenticator + Send>);
+    UpstreamAuth::Negotiate(factory)
+}
+
+/// Spawn a hostile fake upstream that answers EVERY leg with a fresh Negotiate
+/// 407 challenge and never grants 200. The connection is kept alive so the
+/// proxy keeps handshaking until its own leg cap trips; the fake then observes
+/// the closed socket and exits (no hang, no leak on the fake side).
+pub async fn spawn_looping_negotiate_upstream() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let challenge = STANDARD.encode(SERVER_CHALLENGE);
+                let resp = format!(
+                    "HTTP/1.1 407 Proxy Authentication Required\r\n\
+Proxy-Authenticate: Negotiate {challenge}\r\n\
+Content-Length: 0\r\n\
+Connection: keep-alive\r\n\r\n"
+                );
+                while read_request(&mut stream).await.is_some() {
+                    if stream.write_all(resp.as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    addr
+}
+
 const R407_BASIC: &str = "HTTP/1.1 407 Proxy Authentication Required\r\n\
 Proxy-Authenticate: Basic realm=\"corp\"\r\n\
 Content-Length: 0\r\n\
