@@ -70,6 +70,15 @@ impl AppState {
         &self.token
     }
 
+    /// Whether mutating routes require the `X-Zicade-Token` header, read live
+    /// from the in-memory config (`web.authRequired`, default `false`).
+    pub(crate) fn auth_required(&self) -> bool {
+        self.config
+            .lock()
+            .map(|c| c.web.auth_required)
+            .unwrap_or(false)
+    }
+
     /// The log store feeding the SSE stream.
     pub(crate) fn logs(&self) -> &LogStore {
         &self.logs

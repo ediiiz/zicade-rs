@@ -36,9 +36,16 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Reject any mutating request whose `X-Zicade-Token` header is missing or does
-/// not match the configured token, with `401 Unauthorized`.
+/// Gate mutating requests. When `web.authRequired` is `false` (the default) the
+/// request passes straight through — the loopback-only bind is the only control
+/// needed and auth is normally unneeded. When it is `true`, a request whose
+/// `X-Zicade-Token` header is missing or does not match the configured token is
+/// rejected with `401 Unauthorized` (preserving the prior behavior, which also
+/// serves as CSRF protection).
 async fn token_gate(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    if !state.auth_required() {
+        return next.run(req).await;
+    }
     let provided = req
         .headers()
         .get(TOKEN_HEADER)
