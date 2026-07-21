@@ -15,6 +15,6 @@ pub use error::ConfigError;
 pub use io::{from_json_str, load_file, save_file, to_json_string};
 pub use model::{
     AuthConfig, AuthMode, Config, FailPolicy, ListenConfig, LoggingConfig, PacConfig, PacSource,
-    RoutingConfig, RoutingMode, UpstreamConfig,
+    RoutingConfig, RoutingMode, SspiPackage, UpstreamConfig,
 };
 pub use validate::ValidationCtx;

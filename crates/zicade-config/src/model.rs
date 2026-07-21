@@ -128,11 +128,31 @@ pub enum AuthMode {
     Negotiate,
 }
 
+/// The SSPI security package used for a Negotiate-mode upstream handshake.
+///
+/// Defaults to [`SspiPackage::Ntlm`], preserving the deliberate NTLM-only
+/// behavior needed by the corporate gateway (which rejects SPNEGO and has no
+/// Kerberos SPN). Environments that DO register a Kerberos SPN can opt into
+/// `negotiate` for Kerberos SSO. Ignored for non-`negotiate` auth modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SspiPackage {
+    /// The `NTLM` package (three-leg NTLM handshake). Default.
+    #[default]
+    Ntlm,
+    /// The `Negotiate` package (SPNEGO; Kerberos when an SPN is available).
+    Negotiate,
+}
+
 /// Authentication configuration for an upstream.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct AuthConfig {
     #[serde(default)]
     pub mode: AuthMode,
+    /// SSPI package for `negotiate` mode; defaults to NTLM. Harmless for other
+    /// modes.
+    #[serde(default)]
+    pub package: SspiPackage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
