@@ -112,6 +112,70 @@ Connection: keep-alive\r\n\r\n"
     }
 }
 
+const R407_BASIC: &str = "HTTP/1.1 407 Proxy Authentication Required\r\n\
+Proxy-Authenticate: Basic realm=\"corp\"\r\n\
+Content-Length: 0\r\n\
+Connection: keep-alive\r\n\r\n";
+
+/// Build an [`UpstreamAuth::Basic`] carrying a ready-to-send header value.
+pub fn basic_auth(credentials: &str) -> UpstreamAuth {
+    UpstreamAuth::Basic {
+        credentials: credentials.to_owned(),
+    }
+}
+
+/// Spawn a fake upstream that demands HTTP Basic: it answers `407` with a
+/// `Proxy-Authenticate: Basic` challenge until it sees the exact
+/// `Proxy-Authorization: <expected>` value, then `200` (CONNECT becomes an echo
+/// tunnel; a plain request echoes its body). A wrong credential loops on `407`.
+pub async fn spawn_basic_upstream(expected: &'static str) -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            tokio::spawn(serve_basic(stream, expected));
+        }
+    });
+    addr
+}
+
+async fn serve_basic(mut stream: TcpStream, expected: &str) {
+    loop {
+        let Some((head, body)) = read_request(&mut stream).await else {
+            return;
+        };
+        if !head_has_authorization(&head, expected) {
+            if stream.write_all(R407_BASIC.as_bytes()).await.is_err() {
+                return;
+            }
+            continue;
+        }
+        if head.starts_with("CONNECT") {
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .await;
+            echo_tunnel(stream).await;
+            return;
+        }
+        let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.write_all(&body).await;
+        return;
+    }
+}
+
+/// Whether the request head carries `Proxy-Authorization: <expected>` (header
+/// name case-insensitive, value exact).
+fn head_has_authorization(head: &str, expected: &str) -> bool {
+    head.split("\r\n").any(|line| {
+        line.split_once(':')
+            .map(|(k, v)| {
+                k.trim().eq_ignore_ascii_case("proxy-authorization") && v.trim() == expected
+            })
+            .unwrap_or(false)
+    })
+}
+
 /// Spawn a fake upstream that grants a `CONNECT` tunnel immediately with no auth.
 pub async fn spawn_noauth_upstream() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
