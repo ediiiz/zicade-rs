@@ -11,6 +11,10 @@
 
 use std::fmt;
 
+mod sspi;
+
+pub use sspi::{LoopbackReport, SspiNegotiate, run_loopback_handshake};
+
 /// Error returned by platform integration points.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WinError {
@@ -129,5 +133,30 @@ mod tests {
     #[test]
     fn sspi_probe_unsupported_off_windows() {
         assert_eq!(probe_sspi_negotiate(), Err(WinError::UnsupportedPlatform));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sspi_loopback_handshake_completes() {
+        // LESSON-3: pair a real client (ISC) with a real server (ASC) on this
+        // machine to produce GENUINE tokens and run the handshake to completion,
+        // without a remote server and without hand-made tokens (which SSPI
+        // rejected with SEC_E_INVALID_TOKEN in the prior build). `None` target
+        // biases toward NTLM, which completes cleanly on loopback.
+        let report = run_loopback_handshake(None).expect("loopback handshake should run");
+        assert!(report.completed, "handshake did not complete: {report:?}");
+        assert!(
+            report.client_legs >= 1 && report.server_legs >= 1,
+            "{report:?}"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn sspi_loopback_unsupported_off_windows() {
+        assert_eq!(
+            run_loopback_handshake(None),
+            Err(WinError::UnsupportedPlatform)
+        );
     }
 }

@@ -560,6 +560,7 @@ name = "zicade-win"
 version = "0.1.0"
 dependencies = [
  "windows",
+ "zicade-auth",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ rust-version.workspace = true
 # `#![forbid(unsafe_code)]`. Every other crate does.
 
 [dependencies]
+zicade-auth = { path = "../zicade-auth" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
