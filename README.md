@@ -116,7 +116,8 @@ Notes:
       "host": "wp8080", "port": 8080,
       "auth": {
         "mode": "negotiate",           // "none" | "basic" | "negotiate"
-        "username": null, "password": null
+        "package": "ntlm",             // negotiate only: "ntlm" (default) | "negotiate"
+        "username": null, "password": null   // username required when mode = "basic"
       }
     },
     "pac": {                           // required when mode = "pac"
@@ -131,8 +132,8 @@ Notes:
 ```
 
 Validation runs at startup and **fails fast** with a clear message: ports must
-be non-zero, `upstream`/`pac` sections are required for their modes, and
-`negotiate` auth is only accepted on Windows.
+be non-zero, `upstream`/`pac` sections are required for their modes, `basic` auth
+requires a username, and `negotiate` auth is only accepted on Windows.
 
 ## Web UI
 
@@ -206,18 +207,26 @@ It installs then immediately deletes a throwaway `ZicadeServiceItTest` service.
   stream state, mid-reuse reconnect/re-auth, and keep-alive framing complexity
   with real risk to the handle-stability guarantee, for a latency win that does
   not justify it. `CONNECT` tunnels are inherently per-connection and unaffected.
-- **Basic upstream auth is not wired.** `auth.mode = "basic"` currently logs a
-  warning and proceeds **without** proxy authentication. Use `negotiate` (or
-  `none`). `none` and `negotiate` are fully wired.
 - **`negotiate` is Windows-only.** Off-Windows, config validation rejects it; if
   a Negotiate authenticator is somehow constructed off-target, it errors at
   handshake time rather than at startup.
-- **`negotiate` uses the NTLM SSPI package, not SPNEGO/Kerberos.** The target
-  corporate gateway (Skyhigh/McAfee) offers `Negotiate`/`NTLM`/`Basic` but does
-  not accept SPNEGO, and has no Kerberos SPN for the proxy appliance. The SSPI
-  `Negotiate` package's raw-NTLM fallback also cannot complete against it
-  (`SEC_E_INVALID_TOKEN` on the challenge leg). We therefore acquire the SSPI
-  credential with the **NTLM** package, which completes the standard three-leg
-  NTLM handshake; the gateway accepts the token under the `Negotiate` scheme.
-  Environments that require Kerberos SSO would need this package made
-  configurable.
+- **`negotiate` defaults to the NTLM SSPI package, not SPNEGO/Kerberos.** The
+  target corporate gateway (Skyhigh/McAfee) offers `Negotiate`/`NTLM`/`Basic` but
+  does not accept SPNEGO, and has no Kerberos SPN for the proxy appliance. The
+  SSPI `Negotiate` package's raw-NTLM fallback also cannot complete against it
+  (`SEC_E_INVALID_TOKEN` on the challenge leg). So the SSPI package defaults to
+  **NTLM**, which completes the standard three-leg handshake; the gateway accepts
+  the token under the `Negotiate` scheme. Environments with a Kerberos SPN can
+  opt into Kerberos SSO by setting `auth.package = "negotiate"` (see config).
+
+## Upstream authentication
+
+`auth.mode` selects how Zicade authenticates to the upstream proxy:
+
+- `none` — no proxy authentication.
+- `basic` — sends `Proxy-Authorization: Basic base64(user:pass)` preemptively;
+  requires a non-empty `auth.username` (validated at startup). A `407` after the
+  credential was sent fails cleanly (no retry loop).
+- `negotiate` — Windows SSPI. `auth.package` picks the security package:
+  `"ntlm"` (default, required by the target gateway) or `"negotiate"`
+  (SPNEGO/Kerberos, for gateways with a registered SPN).
