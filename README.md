@@ -43,6 +43,22 @@ The workspace is a strict-TDD Cargo workspace:
   tests** below must run **on-corp** against the real upstream. Build/vendor deps
   off-corp first, then run the live suite on-corp.
 
+## Releases
+
+Releases are automated with [release-please]. Conventional-commit messages on
+`main` (`feat:`, `fix:`, …) drive a rolling **release PR** that bumps the
+workspace version (`Cargo.toml`, tracked via an `x-release-please-version`
+annotation) and updates `CHANGELOG.md`. Merging that PR tags the commit, creates
+the GitHub Release, and the pipeline builds the Windows `zicade.exe` and attaches
+it to the release.
+
+CI builds the release binary with the **MSVC** toolchain on `windows-latest`
+(the pinned `x86_64-pc-windows-gnu` setup in `.cargo/config.toml` is a
+developer-local convenience; the workflow overrides it). The app icon is
+embedded either way — see [System-tray mode](#system-tray-mode-double-click).
+
+[release-please]: https://github.com/googleapis/release-please
+
 ## Running
 
 ```sh
