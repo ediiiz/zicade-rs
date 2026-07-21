@@ -13,6 +13,7 @@ use std::fmt;
 
 pub mod service;
 mod sspi;
+pub mod tray;
 mod winhttp;
 
 pub use service::ServiceStop;
@@ -29,6 +30,9 @@ pub enum WinError {
     /// A Service Control Manager operation failed; the message names the failing
     /// call and its Win32/HRESULT code (e.g. access-denied without Administrator).
     Service(String),
+    /// A system-tray / console / shell-open operation failed; the message names
+    /// the failing call and its code.
+    Tray(String),
 }
 
 impl fmt::Display for WinError {
@@ -37,6 +41,7 @@ impl fmt::Display for WinError {
             WinError::UnsupportedPlatform => write!(f, "unsupported platform (not Windows)"),
             WinError::Sspi(code) => write!(f, "SSPI call failed: 0x{code:08x}"),
             WinError::Service(msg) => write!(f, "service control manager error: {msg}"),
+            WinError::Tray(msg) => write!(f, "system-tray error: {msg}"),
         }
     }
 }
