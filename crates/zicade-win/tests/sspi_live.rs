@@ -30,7 +30,8 @@ fn sspi_negotiate_initial_token_gated() {
         .map_or(upstream.as_str(), |(h, _)| h);
     let spn = format!("HTTP/{host}");
 
-    let mut auth = SspiNegotiate::new(Some(&spn)).expect("acquire Negotiate credential handle");
+    let mut auth = SspiNegotiate::new(Some(&spn), zicade_win::SspiPackage::Ntlm)
+        .expect("acquire Negotiate credential handle");
     let token = auth
         .step(None)
         .expect("SSPI must produce an initial Negotiate token");
@@ -47,9 +48,9 @@ fn sspi_negotiate_initial_token_gated() {
 #[cfg(not(windows))]
 #[test]
 fn sspi_negotiate_unsupported_off_windows() {
-    use zicade_win::{SspiNegotiate, WinError};
+    use zicade_win::{SspiNegotiate, SspiPackage, WinError};
     assert_eq!(
-        SspiNegotiate::new(Some("HTTP/wp8080")).err(),
+        SspiNegotiate::new(Some("HTTP/wp8080"), SspiPackage::Ntlm).err(),
         Some(WinError::UnsupportedPlatform)
     );
 }

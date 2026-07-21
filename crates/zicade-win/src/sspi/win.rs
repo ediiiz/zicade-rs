@@ -16,21 +16,26 @@ use windows::Win32::Security::Authentication::Identity::{
 use windows::Win32::Security::Credentials::SecHandle;
 use windows::core::{PCWSTR, w};
 
-use super::LoopbackReport;
+use super::{LoopbackReport, SspiPackage};
 use crate::WinError;
 
-/// The SSPI security package used for upstream proxy authentication.
+/// The SSPI package name (`AcquireCredentialsHandleW`'s `pszpackage`) for the
+/// selected [`SspiPackage`].
 ///
-/// We use **NTLM** rather than **Negotiate** deliberately. The corporate McAfee /
-/// Skyhigh Secure Web Gateway offers `Negotiate`, `NTLM`, and `Basic`, but does
-/// not accept SPNEGO: sending a SPNEGO `NegTokenInit` makes it re-offer auth with
-/// no continuation token, and the Negotiate package's raw-NTLM fallback cannot
-/// consume the gateway's NTLM Type-2 challenge (it fails ISC with
-/// `SEC_E_INVALID_TOKEN`). The NTLM package completes the standard three-leg
-/// NTLM handshake and the gateway accepts the resulting token under either the
-/// `Negotiate` or `NTLM` scheme label. (There is no Kerberos SPN registered for
-/// the proxy appliance, so Negotiate/Kerberos buys us nothing here anyway.)
-const SSPI_PACKAGE: PCWSTR = w!("NTLM");
+/// **NTLM** is the default. The corporate McAfee / Skyhigh Secure Web Gateway
+/// offers `Negotiate`, `NTLM`, and `Basic`, but does not accept SPNEGO: sending a
+/// SPNEGO `NegTokenInit` makes it re-offer auth with no continuation token, and
+/// the Negotiate package's raw-NTLM fallback cannot consume the gateway's NTLM
+/// Type-2 challenge (it fails ISC with `SEC_E_INVALID_TOKEN`). The NTLM package
+/// completes the standard three-leg NTLM handshake and the gateway accepts the
+/// resulting token under either the `Negotiate` or `NTLM` scheme label.
+/// Environments with a registered Kerberos SPN can select `Negotiate` for SSO.
+fn package_name(package: SspiPackage) -> PCWSTR {
+    match package {
+        SspiPackage::Ntlm => w!("NTLM"),
+        SspiPackage::Negotiate => w!("Negotiate"),
+    }
+}
 
 fn sspi_err(e: windows::core::Error) -> WinError {
     WinError::Sspi(e.code().0)
@@ -40,14 +45,14 @@ fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn acquire_cred(usage: SECPKG_CRED) -> Result<SecHandle, WinError> {
+fn acquire_cred(usage: SECPKG_CRED, package: SspiPackage) -> Result<SecHandle, WinError> {
     let mut cred = SecHandle::default();
     // SAFETY: null principal (default identity), valid static package name, all
     // optional inputs None, and a valid out-pointer for the handle.
     unsafe {
         AcquireCredentialsHandleW(
             PCWSTR::null(),
-            SSPI_PACKAGE,
+            package_name(package),
             usage,
             None,
             None,
@@ -113,9 +118,9 @@ pub(super) struct ClientContext {
 }
 
 impl ClientContext {
-    pub(super) fn new(target_spn: Option<&str>) -> Result<Self, WinError> {
+    pub(super) fn new(target_spn: Option<&str>, package: SspiPackage) -> Result<Self, WinError> {
         Ok(Self {
-            cred: acquire_cred(SECPKG_CRED_OUTBOUND)?,
+            cred: acquire_cred(SECPKG_CRED_OUTBOUND, package)?,
             ctx: None,
             target: target_spn.map(to_wide),
         })
@@ -184,9 +189,9 @@ pub(super) struct ServerContext {
 }
 
 impl ServerContext {
-    pub(super) fn new() -> Result<Self, WinError> {
+    pub(super) fn new(package: SspiPackage) -> Result<Self, WinError> {
         Ok(Self {
-            cred: acquire_cred(SECPKG_CRED_INBOUND)?,
+            cred: acquire_cred(SECPKG_CRED_INBOUND, package)?,
             ctx: None,
         })
     }
@@ -242,8 +247,10 @@ impl Drop for ServerContext {
 }
 
 pub(super) fn run_loopback(target_spn: Option<&str>) -> Result<LoopbackReport, WinError> {
-    let mut client = ClientContext::new(target_spn)?;
-    let mut server = ServerContext::new()?;
+    // Client and server must acquire the SAME package for a self-consistent
+    // handshake; NTLM completes cleanly on loopback (LESSON-3).
+    let mut client = ClientContext::new(target_spn, SspiPackage::Ntlm)?;
+    let mut server = ServerContext::new(SspiPackage::Ntlm)?;
 
     let mut client_token = client.step(None)?;
     let mut client_legs = 1u32;

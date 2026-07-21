@@ -10,6 +10,20 @@ use crate::WinError;
 #[cfg(windows)]
 mod win;
 
+/// Which SSPI security package to acquire for the outbound handshake.
+///
+/// Defaults to [`SspiPackage::Ntlm`]: the corporate gateway rejects SPNEGO and
+/// has no Kerberos SPN, so only NTLM completes there. Environments with a
+/// registered Kerberos SPN can select [`SspiPackage::Negotiate`] for SSO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SspiPackage {
+    /// The `NTLM` package. Default.
+    #[default]
+    Ntlm,
+    /// The `Negotiate` package (SPNEGO / Kerberos).
+    Negotiate,
+}
+
 /// Outcome of the loopback SSPI handshake harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoopbackReport {
@@ -29,19 +43,19 @@ pub struct SspiNegotiate {
 }
 
 impl SspiNegotiate {
-    /// Acquire a Negotiate outbound credential handle for the logged-in user.
-    /// `target_spn` is the upstream's service principal name (e.g.
-    /// `"HTTP/wp8080"`); `None` biases toward NTLM (used by the loopback test).
-    pub fn new(target_spn: Option<&str>) -> Result<Self, WinError> {
+    /// Acquire an outbound credential handle for the logged-in user using the
+    /// selected `package`. `target_spn` is the upstream's service principal
+    /// name (e.g. `"HTTP/wp8080"`).
+    pub fn new(target_spn: Option<&str>, package: SspiPackage) -> Result<Self, WinError> {
         #[cfg(windows)]
         {
             Ok(Self {
-                inner: win::ClientContext::new(target_spn)?,
+                inner: win::ClientContext::new(target_spn, package)?,
             })
         }
         #[cfg(not(windows))]
         {
-            let _ = target_spn;
+            let _ = (target_spn, package);
             Err(WinError::UnsupportedPlatform)
         }
     }
