@@ -32,6 +32,7 @@ tokio = { workspace = true, features = ["signal"] }
 zicade-config = { path = "../../crates/zicade-config" }
 zicade-observe = { path = "../../crates/zicade-observe" }
 zicade-proxy = { path = "../../crates/zicade-proxy" }
+zicade-win = { path = "../../crates/zicade-win" }
 
 [lints]
 workspace = true
