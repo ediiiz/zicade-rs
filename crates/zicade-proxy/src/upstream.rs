@@ -9,7 +9,9 @@
 mod wire;
 
 use std::fmt;
+use std::future::Future;
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -67,6 +69,25 @@ pub struct UpstreamTarget {
     pub auth: UpstreamAuth,
 }
 
+/// The per-request routing decision a [`PacRouter`] produces. Mirrors the fixed
+/// [`Routing`] variants so PAC dispatch reuses the SAME direct/upstream code
+/// paths.
+#[derive(Clone, Debug)]
+pub enum RouteChoice {
+    /// Connect straight to the origin.
+    Direct,
+    /// Route through this upstream proxy (carrying its inherited auth).
+    Upstream(UpstreamTarget),
+}
+
+/// Resolves a request URL to a [`RouteChoice`], once per request. The closure is
+/// injected by the app (backed by WinHTTP PAC) so zicade-proxy stays decoupled
+/// from zicade-routing / zicade-win — mirroring the [`AuthFactory`] seam. A
+/// resolver `Err` is surfaced as `502`, never a panic.
+pub type PacRouter = Arc<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = io::Result<RouteChoice>> + Send>> + Send + Sync,
+>;
+
 /// How the proxy routes outbound traffic.
 #[derive(Clone, Default)]
 pub enum Routing {
@@ -75,6 +96,9 @@ pub enum Routing {
     Direct,
     /// Route everything through the configured upstream proxy.
     Upstream(UpstreamTarget),
+    /// Resolve each request via an injected PAC router (per-request DIRECT vs
+    /// PROXY selection).
+    Pac(PacRouter),
 }
 
 impl fmt::Debug for Routing {
@@ -82,6 +106,7 @@ impl fmt::Debug for Routing {
         match self {
             Self::Direct => f.write_str("Direct"),
             Self::Upstream(_) => f.write_str("Upstream"),
+            Self::Pac(_) => f.write_str("Pac"),
         }
     }
 }

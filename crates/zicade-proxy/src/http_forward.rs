@@ -14,7 +14,7 @@ use tokio::net::TcpStream;
 
 use crate::metrics::ProxyMetrics;
 use crate::tunnel;
-use crate::upstream::{self, Routing, UpstreamTarget};
+use crate::upstream::{self, PacRouter, RouteChoice, Routing, UpstreamTarget};
 
 pub(crate) type BoxedBody = BoxBody<Bytes, hyper::Error>;
 pub(crate) type ForwardError = Box<dyn std::error::Error + Send + Sync>;
@@ -47,6 +47,7 @@ async fn proxy_service(
         return match &routing {
             Routing::Direct => handle_connect(req),
             Routing::Upstream(target) => handle_connect_upstream(req, target).await,
+            Routing::Pac(router) => handle_connect_pac(req, router).await,
         };
     }
     metrics.incr_request();
@@ -55,12 +56,46 @@ async fn proxy_service(
         Routing::Upstream(target) => {
             upstream::forward_via_upstream(&target.addr, req, &target.auth).await
         }
+        Routing::Pac(router) => forward_pac(req, router).await,
     };
     match result {
         Ok(resp) => resp,
         Err(err) => {
             tracing::warn!(error = %err, "http forward failed");
             error_response(StatusCode::BAD_GATEWAY)
+        }
+    }
+}
+
+/// PAC-mode `CONNECT`: resolve the target through the injected router, then
+/// dispatch to the SAME direct/upstream handlers. The PAC input URL is
+/// synthesized from the CONNECT authority as `https://host:port`.
+async fn handle_connect_pac(req: Request<Incoming>, router: &PacRouter) -> Response<BoxedBody> {
+    let Some(dst) = authority_target(req.uri()) else {
+        return error_response(StatusCode::BAD_REQUEST);
+    };
+    match router(format!("https://{dst}")).await {
+        Ok(RouteChoice::Direct) => handle_connect(req),
+        Ok(RouteChoice::Upstream(target)) => handle_connect_upstream(req, &target).await,
+        Err(err) => {
+            tracing::warn!(error = %err, dst, "PAC resolution failed for CONNECT");
+            error_response(StatusCode::BAD_GATEWAY)
+        }
+    }
+}
+
+/// PAC-mode HTTP forward: resolve the (absolute-form) request URI through the
+/// injected router, then dispatch to the SAME direct/upstream handlers. A
+/// resolver error becomes a `ForwardError` (surfaced as `502` by the caller).
+async fn forward_pac(
+    req: Request<Incoming>,
+    router: &PacRouter,
+) -> Result<Response<BoxedBody>, ForwardError> {
+    let url = req.uri().to_string();
+    match router(url).await? {
+        RouteChoice::Direct => forward_http(req).await,
+        RouteChoice::Upstream(target) => {
+            upstream::forward_via_upstream(&target.addr, req, &target.auth).await
         }
     }
 }
