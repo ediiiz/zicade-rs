@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use zicade_auth::header::build_basic_authorization;
 use zicade_auth::{AuthError, UpstreamAuthenticator};
 use zicade_config::{AuthConfig, AuthMode, Config, RoutingMode};
 use zicade_proxy::{AuthFactory, Routing, UpstreamAuth, UpstreamTarget};
@@ -66,11 +67,13 @@ fn build_auth(auth: &AuthConfig, host: &str) -> UpstreamAuth {
     match auth.mode {
         AuthMode::None => UpstreamAuth::None,
         AuthMode::Basic => {
-            tracing::warn!(
-                "Basic upstream auth is not yet wired; connecting without proxy auth \
-                 (known limitation)"
-            );
-            UpstreamAuth::None
+            // Config validation guarantees a non-empty username for basic mode;
+            // password may be empty for some proxies.
+            let username = auth.username.as_deref().unwrap_or_default();
+            let password = auth.password.as_deref().unwrap_or_default();
+            let credentials = build_basic_authorization(username, password);
+            tracing::info!("upstream auth: HTTP Basic");
+            UpstreamAuth::Basic { credentials }
         }
         AuthMode::Negotiate => {
             let package = map_package(auth.package);
