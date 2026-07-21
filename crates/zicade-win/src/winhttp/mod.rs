@@ -18,7 +18,7 @@ mod win;
 /// auto-detect (DHCP + DNS-A), optionally with an explicit PAC config URL.
 pub struct WinHttpPacBackend {
     #[cfg(windows)]
-    session: win::Session,
+    backend: win::Backend,
 }
 
 impl WinHttpPacBackend {
@@ -28,7 +28,7 @@ impl WinHttpPacBackend {
         #[cfg(windows)]
         {
             Ok(Self {
-                session: win::Session::open(None)?,
+                backend: win::Backend::Session(win::Session::open(None)?),
             })
         }
         #[cfg(not(windows))]
@@ -44,12 +44,38 @@ impl WinHttpPacBackend {
         #[cfg(windows)]
         {
             Ok(Self {
-                session: win::Session::open(Some(config_url))?,
+                backend: win::Backend::Session(win::Session::open(Some(config_url))?),
             })
         }
         #[cfg(not(windows))]
         {
             let _ = config_url;
+            Err(RoutingError::UnsupportedPlatform)
+        }
+    }
+
+    /// Discover the effective proxy configuration the way Windows and browsers
+    /// do, honouring the per-user WinINET/IE settings with MSDN precedence:
+    ///
+    /// 1. the "Use setup script" address (`AutoConfigUrl`, a PAC URL);
+    /// 2. WPAD network auto-detect (`fAutoDetect`);
+    /// 3. a static manual proxy (honouring its bypass list);
+    /// 4. otherwise DIRECT (nothing configured).
+    ///
+    /// This is what `pac.source = "auto"` uses. It fixes the prior behaviour
+    /// where "auto" only did WPAD auto-detect and failed with
+    /// `ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT` on machines whose PAC lives in
+    /// the per-user `AutoConfigURL`. Off-Windows returns
+    /// [`RoutingError::UnsupportedPlatform`].
+    pub fn from_system() -> Result<Self, RoutingError> {
+        #[cfg(windows)]
+        {
+            Ok(Self {
+                backend: win::Backend::from_system()?,
+            })
+        }
+        #[cfg(not(windows))]
+        {
             Err(RoutingError::UnsupportedPlatform)
         }
     }
@@ -59,7 +85,7 @@ impl PacBackend for WinHttpPacBackend {
     fn resolve(&self, url: &str) -> Result<PacResult, RoutingError> {
         #[cfg(windows)]
         {
-            self.session.resolve(url)
+            self.backend.resolve(url)
         }
         #[cfg(not(windows))]
         {

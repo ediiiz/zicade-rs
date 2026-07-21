@@ -103,7 +103,7 @@ fn build_backend(
     path: Option<String>,
 ) -> Result<WinHttpPacBackend, String> {
     let backend = match source {
-        PacSource::Auto => WinHttpPacBackend::new(),
+        PacSource::Auto => WinHttpPacBackend::from_system(),
         PacSource::Url => {
             let url =
                 url.ok_or_else(|| "routing.pac.url is required for source = \"url\"".to_owned())?;

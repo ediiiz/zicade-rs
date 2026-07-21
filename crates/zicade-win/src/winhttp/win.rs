@@ -6,12 +6,55 @@ use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
 use windows::Win32::Networking::WinHttp::{
     WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_AUTO_DETECT_TYPE_DHCP,
     WINHTTP_AUTO_DETECT_TYPE_DNS_A, WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL,
-    WINHTTP_AUTOPROXY_OPTIONS, WINHTTP_PROXY_INFO, WinHttpCloseHandle, WinHttpGetProxyForUrl,
-    WinHttpOpen,
+    WINHTTP_AUTOPROXY_OPTIONS, WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WINHTTP_PROXY_INFO,
+    WinHttpCloseHandle, WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen,
 };
-use windows::core::{PCWSTR, PWSTR, w};
+use windows::core::{HRESULT, PCWSTR, PWSTR, w};
 
 use zicade_routing::{PacResult, RoutingError};
+
+use super::discovery::{IeProxyConfig, StaticResolver, Strategy, select_strategy};
+
+/// HRESULT for `ERROR_FILE_NOT_FOUND` — `WinHttpGetIEProxyConfigForCurrentUser`
+/// reports "no IE proxy config for this user" this way; we treat it as an empty
+/// configuration (=> DIRECT) rather than a hard error.
+const HRESULT_FILE_NOT_FOUND: HRESULT = HRESULT(0x8007_0002u32 as i32);
+
+/// The concrete resolver `source = "auto"` discovery selects: a live WinHTTP
+/// session (PAC config URL or WPAD auto-detect), a pure static-proxy resolver,
+/// or an unconditional DIRECT.
+pub(super) enum Backend {
+    Session(Session),
+    Static(StaticResolver),
+    Direct,
+}
+
+impl Backend {
+    /// Discover the effective proxy configuration like Windows/browsers do:
+    /// read the per-user IE settings, then apply AutoConfigUrl > WPAD > static
+    /// proxy > DIRECT (see [`select_strategy`]).
+    pub(super) fn from_system() -> Result<Self, RoutingError> {
+        let cfg = read_ie_proxy_config()?;
+        match select_strategy(&cfg) {
+            Strategy::ConfigUrl(url) => Ok(Backend::Session(Session::open(Some(&url))?)),
+            Strategy::Wpad => Ok(Backend::Session(Session::open(None)?)),
+            Strategy::StaticProxy { proxy, bypass } => Ok(Backend::Static(StaticResolver::new(
+                &proxy,
+                bypass.as_deref(),
+            ))),
+            Strategy::Direct => Ok(Backend::Direct),
+        }
+    }
+
+    /// Resolve the proxy decision for `url`.
+    pub(super) fn resolve(&self, url: &str) -> Result<PacResult, RoutingError> {
+        match self {
+            Backend::Session(session) => session.resolve(url),
+            Backend::Static(resolver) => Ok(resolver.resolve(url)),
+            Backend::Direct => Ok(PacResult::Direct),
+        }
+    }
+}
 
 /// Encode a Rust string as a NUL-terminated UTF-16 buffer for Win32.
 fn wide(s: &str) -> Vec<u16> {
@@ -135,4 +178,57 @@ fn free_pwstr(s: PWSTR) {
     unsafe {
         let _ = GlobalFree(Some(HGLOBAL(s.as_ptr().cast::<c_void>())));
     }
+}
+
+/// Read the per-user WinINET/IE proxy configuration
+/// (`WinHttpGetIEProxyConfigForCurrentUser`) into owned Rust values.
+///
+/// The call allocates the three `PWSTR` members with `GlobalAlloc`; the caller
+/// owns them and MUST free each with `GlobalFree`. [`take_pwstr`] copies each
+/// non-null string out and frees it exactly once, so no pointer leaks and none
+/// is freed twice. On the error path nothing was allocated, so nothing is freed
+/// (`ERROR_FILE_NOT_FOUND` is mapped to an empty config, i.e. DIRECT).
+fn read_ie_proxy_config() -> Result<IeProxyConfig, RoutingError> {
+    let mut raw = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG::default();
+    // SAFETY: `raw` is a valid, zeroed out-parameter of the exact expected type.
+    // On success WinHTTP fills its three PWSTR fields with GlobalAlloc'd strings
+    // that we copy out and free below via `take_pwstr`.
+    let call = unsafe { WinHttpGetIEProxyConfigForCurrentUser(&mut raw) };
+    if let Err(err) = call {
+        if err.code() == HRESULT_FILE_NOT_FOUND {
+            return Ok(IeProxyConfig::empty());
+        }
+        return Err(RoutingError::Backend(format!(
+            "WinHttpGetIEProxyConfigForCurrentUser failed: 0x{:08x}",
+            err.code().0
+        )));
+    }
+    // Copy each string out and free it before returning; `fAutoDetect` is a
+    // plain BOOL (no allocation).
+    let auto_config_url = take_pwstr(raw.lpszAutoConfigUrl);
+    let proxy = take_pwstr(raw.lpszProxy);
+    let bypass = take_pwstr(raw.lpszProxyBypass);
+    Ok(IeProxyConfig {
+        auto_config_url,
+        auto_detect: raw.fAutoDetect.as_bool(),
+        proxy,
+        bypass,
+    })
+}
+
+/// Copy a WinHTTP-allocated `PWSTR` into an owned `String`, then free it exactly
+/// once with `GlobalFree`. Returns `None` for a null pointer or empty string.
+fn take_pwstr(s: PWSTR) -> Option<String> {
+    if s.is_null() {
+        return None;
+    }
+    // SAFETY: `s` is a non-null, NUL-terminated wide string WinHTTP allocated
+    // with `GlobalAlloc`; we read it exactly once here.
+    let value = unsafe { s.to_string() }.ok();
+    // SAFETY: the pointer is freed exactly once immediately after the single
+    // read above, and `s` is not used again (no double-free, no leak).
+    unsafe {
+        let _ = GlobalFree(Some(HGLOBAL(s.as_ptr().cast::<c_void>())));
+    }
+    value.filter(|v| !v.is_empty())
 }
