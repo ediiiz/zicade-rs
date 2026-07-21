@@ -77,5 +77,11 @@ fn check_auth(
     if auth.mode == AuthMode::Negotiate && !ctx.negotiate_supported {
         return Err(ConfigError::NegotiateUnsupported { field });
     }
+    if auth.mode == AuthMode::Basic {
+        let username = auth.username.as_deref().unwrap_or("").trim();
+        if username.is_empty() {
+            return Err(ConfigError::MissingCredentials { field });
+        }
+    }
     Ok(())
 }

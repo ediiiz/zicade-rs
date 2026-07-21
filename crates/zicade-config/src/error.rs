@@ -30,4 +30,9 @@ pub enum ConfigError {
     /// `auth.mode = negotiate` was set on a platform without SSPI support.
     #[error("auth mode 'negotiate' in {field} is only supported on Windows")]
     NegotiateUnsupported { field: &'static str },
+
+    /// `auth.mode = basic` was set without a (non-empty) username. The password
+    /// may be empty for some proxies, but a username is always required.
+    #[error("auth mode 'basic' in {field} requires a non-empty username")]
+    MissingCredentials { field: &'static str },
 }
