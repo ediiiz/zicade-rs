@@ -171,9 +171,10 @@ real Skyhigh/McAfee Secure Web Gateway at `wp8080:8080`: the multi-leg
 `407 -> NTLM -> 200` handshake, HTTPS via `CONNECT` through the gateway,
 plain-HTTP forwarding, and a soak that holds a flat OS-handle count (no leak).
 
-The live PAC check is tolerant of hosts with no WPAD/PAC autoconfig (a common
-corporate setup that pushes routing via GPO or a static proxy): it logs a skip
-rather than failing when `WinHttpGetProxyForUrl` reports no discoverable script.
+The live PAC check exercises the `source = "auto"` discovery path (per-user
+AutoConfigURL -> WPAD -> static proxy). It is tolerant of hosts with nothing
+configured (a common corporate setup that pushes routing via GPO): discovery
+maps "no config" to DIRECT, so it logs the real decision rather than failing.
 
 ### Service install/uninstall test (gated, elevated)
 
@@ -191,9 +192,17 @@ It installs then immediately deletes a throwaway `ZicadeServiceItTest` service.
 
 - **PAC data-path routing is wired.** In `mode = "pac"` the proxy resolves each
   request through WinHTTP and connects DIRECT or through the resolved upstream
-  (applying `routing.pac.auth`, LESSON-6). `source = "auto"` uses WPAD
-  auto-detect; hosts with no discoverable WPAD script need `source = "url"` (or
-  `"file"`) to point at the PAC explicitly. `failPolicy` governs resolution
+  (applying `routing.pac.auth`, LESSON-6). `source = "auto"` discovers the
+  effective proxy configuration the way Windows and browsers do: it reads the
+  per-user WinINET/IE settings and applies MSDN precedence — the "Use setup
+  script" address (`AutoConfigURL`, a PAC URL) first, then WPAD network
+  auto-detect, then a static manual proxy (honouring its bypass list: `<local>`,
+  exact and `*`-wildcard hosts), and finally DIRECT when nothing is configured.
+  This means a PAC configured only under `HKCU\...\Internet Settings\
+  AutoConfigURL` is now honoured (previously `auto` did WPAD auto-detect only and
+  failed with `ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT` on hosts with no WPAD
+  server). `source = "url"` (or `"file"`) still points at a PAC explicitly.
+  `failPolicy` governs resolution
   failures: `"direct"` falls back to a DIRECT connection, `"error"` fails the
   request with `502`. PAC results are not cached (each request re-resolves).
 - **Upstream connections are authenticated per request, not pooled.** Because

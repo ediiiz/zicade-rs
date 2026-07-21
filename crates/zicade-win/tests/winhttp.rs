@@ -3,10 +3,11 @@
 //! The non-gated Windows test proves `WinHttpOpen` links and that `resolve`
 //! returns a `Result` without panicking (WPAD state varies per machine, so we
 //! assert only that it does not panic). The live test is gated behind
-//! `ZICADE_LIVE_PROXY=1` and skips explicitly otherwise. Off-Windows we assert
-//! the stub reports the platform is unsupported.
+//! `ZICADE_LIVE_PROXY=1` and exercises the `source = "auto"` discovery path
+//! (per-user AutoConfigURL -> WPAD -> static proxy). Off-Windows we assert the
+//! stubs report the platform is unsupported.
 
-use zicade_routing::{PacBackend, RoutingError};
+use zicade_routing::{PacBackend, PacResult, RoutingError};
 use zicade_win::WinHttpPacBackend;
 
 #[cfg(windows)]
@@ -25,6 +26,21 @@ fn winhttp_backend_constructs_and_resolves_without_panic() {
 
 #[cfg(windows)]
 #[test]
+fn winhttp_from_system_constructs_and_resolves_without_panic() {
+    // The discovery constructor reads the per-user IE proxy config. Its outcome
+    // is environment-dependent (AutoConfigURL / WPAD / static proxy / none), so
+    // hermetically we only require it constructs and resolves without panicking.
+    let backend =
+        WinHttpPacBackend::from_system().expect("from_system should construct on Windows");
+    match backend.resolve("http://example.com/") {
+        Ok(_) => {}
+        Err(RoutingError::Backend(_)) => {}
+        Err(other) => panic!("unexpected error variant: {other:?}"),
+    }
+}
+
+#[cfg(windows)]
+#[test]
 fn winhttp_live_pac_resolution_gated() {
     // GATED: only runs with ZICADE_LIVE_PROXY=1 on the domain-joined box.
     if std::env::var("ZICADE_LIVE_PROXY").as_deref() != Ok("1") {
@@ -32,23 +48,41 @@ fn winhttp_live_pac_resolution_gated() {
         return;
     }
 
-    let backend = WinHttpPacBackend::new().expect("WinHttpOpen should succeed on Windows");
+    // Exercise the real discovery path `source = "auto"` uses: read the per-user
+    // IE proxy config, then AutoConfigURL -> WPAD -> static proxy -> DIRECT.
+    let backend =
+        WinHttpPacBackend::from_system().expect("from_system should construct on Windows");
 
-    // WPAD/PAC auto-detection is a per-machine policy: many corporate desktops
-    // (including this test box) use a static proxy or push routing via GPO and
-    // have no discoverable PAC, so `WinHttpGetProxyForUrl` returns
-    // ERROR_WINHTTP_AUTODETECTION_FAILED / _UNABLE_TO_DOWNLOAD_SCRIPT. That is a
-    // valid environment, not a bug: we require the call to return cleanly (a
-    // decision or a typed backend error) and never panic. When a PAC *is*
-    // present, we log the real decisions for inspection.
-    for url in ["https://example.com/", "http://internal.corp.local/"] {
-        match backend.resolve(url) {
-            Ok(decision) => eprintln!("live PAC {url} -> {decision:?}"),
-            Err(RoutingError::Backend(msg)) => {
-                eprintln!("live PAC {url}: no WPAD/PAC configured on this host ({msg}); skipping");
-            }
-            Err(other) => panic!("unexpected PAC error variant for {url}: {other:?}"),
+    // An external host: on a box with a PAC/AutoConfigURL or a static proxy this
+    // resolves to a Proxy; a box with nothing configured legitimately resolves
+    // DIRECT (from_system maps "no config" to DIRECT). Either is valid; we log
+    // the real decision and require the call to return cleanly (never panic).
+    let external = backend.resolve("https://example.com/");
+    match &external {
+        Ok(PacResult::Proxy { host, port }) => {
+            eprintln!("live PAC https://example.com/ -> PROXY {host}:{port}");
         }
+        Ok(PacResult::Direct) => {
+            eprintln!(
+                "live PAC https://example.com/ -> DIRECT (no AutoConfigURL/WPAD/static proxy \
+                 discovered for this user)"
+            );
+        }
+        Err(RoutingError::Backend(msg)) => {
+            // A discovered-but-unreachable PAC/WPAD script surfaces here; that is
+            // a real environment state, not a test failure.
+            eprintln!("live PAC https://example.com/: backend error ({msg})");
+        }
+        Err(other) => panic!("unexpected PAC error variant: {other:?}"),
+    }
+
+    // A likely-internal host, purely for logging (bypass lists / DIRECT rules).
+    match backend.resolve("http://internal.corp.local/") {
+        Ok(decision) => eprintln!("live PAC http://internal.corp.local/ -> {decision:?}"),
+        Err(RoutingError::Backend(msg)) => {
+            eprintln!("live PAC http://internal.corp.local/: backend error ({msg})");
+        }
+        Err(other) => panic!("unexpected PAC error variant: {other:?}"),
     }
 }
 
@@ -57,6 +91,14 @@ fn winhttp_live_pac_resolution_gated() {
 fn winhttp_backend_unsupported_off_windows() {
     assert!(matches!(
         WinHttpPacBackend::new(),
+        Err(RoutingError::UnsupportedPlatform)
+    ));
+    assert!(matches!(
+        WinHttpPacBackend::with_config_url("http://wp/proxy.pac"),
+        Err(RoutingError::UnsupportedPlatform)
+    ));
+    assert!(matches!(
+        WinHttpPacBackend::from_system(),
         Err(RoutingError::UnsupportedPlatform)
     ));
 }
