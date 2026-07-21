@@ -3,7 +3,7 @@
 //! injected [`ValidationCtx`] rather than `cfg!(windows)`.
 
 use zicade_config::{
-    AuthMode, Config, ConfigError, FailPolicy, PacSource, RoutingMode, ValidationCtx,
+    AuthMode, Config, ConfigError, FailPolicy, PacSource, RoutingMode, SspiPackage, ValidationCtx,
     from_json_str, to_json_string,
 };
 
@@ -54,6 +54,59 @@ fn round_trips_through_json() {
     let json = to_json_string(&cfg).unwrap();
     let reparsed = from_json_str(&json).unwrap();
     assert_eq!(cfg, reparsed, "save then load must be lossless");
+}
+
+/// A minimal upstream config whose auth section carries the given trailing
+/// JSON fields (so the `package` key can be present or absent).
+fn upstream_auth_json(auth_fields: &str) -> String {
+    format!(
+        r#"{{ "listen": {{ "host": "127.0.0.1", "port": 3129 }},
+              "routing": {{ "mode": "upstream",
+                            "upstream": {{ "host": "wp8080", "port": 8080,
+                                          "auth": {{ "mode": "negotiate"{auth_fields} }} }} }} }}"#
+    )
+}
+
+#[test]
+fn auth_package_defaults_to_ntlm_when_omitted() {
+    // Preserves current runtime behavior: no `package` key => NTLM.
+    let cfg = from_json_str(&upstream_auth_json("")).expect("parses without package");
+    let up = cfg.routing.upstream.as_ref().unwrap();
+    assert_eq!(up.auth.package, SspiPackage::Ntlm);
+}
+
+#[test]
+fn auth_package_parses_negotiate_and_ntlm() {
+    let neg = from_json_str(&upstream_auth_json(r#", "package": "negotiate""#)).unwrap();
+    assert_eq!(
+        neg.routing.upstream.as_ref().unwrap().auth.package,
+        SspiPackage::Negotiate
+    );
+
+    let ntlm = from_json_str(&upstream_auth_json(r#", "package": "ntlm""#)).unwrap();
+    assert_eq!(
+        ntlm.routing.upstream.as_ref().unwrap().auth.package,
+        SspiPackage::Ntlm
+    );
+}
+
+#[test]
+fn auth_package_rejects_unknown_value() {
+    let err = from_json_str(&upstream_auth_json(r#", "package": "kerberos""#))
+        .expect_err("unknown package must be rejected");
+    assert!(matches!(err, ConfigError::Parse(_)), "got {err:?}");
+}
+
+#[test]
+fn auth_package_round_trips() {
+    let cfg = from_json_str(&upstream_auth_json(r#", "package": "negotiate""#)).unwrap();
+    let json = to_json_string(&cfg).unwrap();
+    let reparsed = from_json_str(&json).unwrap();
+    assert_eq!(cfg, reparsed, "save then load must be lossless");
+    assert_eq!(
+        reparsed.routing.upstream.as_ref().unwrap().auth.package,
+        SspiPackage::Negotiate
+    );
 }
 
 #[test]
