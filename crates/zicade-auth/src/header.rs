@@ -36,3 +36,12 @@ pub fn parse_proxy_authenticate(value: &str) -> NegotiateOffer {
 pub fn build_proxy_authorization(token: &[u8]) -> String {
     format!("Negotiate {}", STANDARD.encode(token))
 }
+
+/// Build a `Proxy-Authorization` header value carrying HTTP Basic credentials
+/// (`Basic base64(username:password)`, per RFC 7617). The password may be empty.
+pub fn build_basic_authorization(username: &str, password: &str) -> String {
+    format!(
+        "Basic {}",
+        STANDARD.encode(format!("{username}:{password}"))
+    )
+}
