@@ -105,6 +105,28 @@ Notes:
 - Without Administrator, install/uninstall fail cleanly with an access-denied
   message (no panic).
 
+## System-tray mode (double-click)
+
+When `zicade.exe` is launched with **no subcommand**, it chooses between console
+and tray mode by how it was started:
+
+- **Double-clicked in Explorer** — the process owns a freshly-created console
+  (detected via `GetConsoleProcessList` returning `1`). Zicade **hides that
+  console** and runs with a **system-tray (notification-area) icon**, serving the
+  proxy + web UI exactly as console mode does.
+- **Run as `zicade` from an existing cmd/PowerShell** — the console is shared
+  (process count `> 1`), so it stays in **console mode** as before.
+
+Explicit subcommands never enter tray mode: `zicade run`, `zicade service …`, and
+`zicade --help` always keep their current behavior regardless of how they were
+launched.
+
+The tray icon's right-click menu has exactly two items:
+
+- **Open WebUI** — opens the web UI (`http://127.0.0.1:3130/`, i.e. the proxy
+  port + 1 from the loaded config) in the default browser.
+- **Close** — triggers the same graceful shutdown as Ctrl-C and exits.
+
 ### Config schema (brief)
 
 ```jsonc
