@@ -11,9 +11,11 @@
 
 use std::fmt;
 
+pub mod service;
 mod sspi;
 mod winhttp;
 
+pub use service::ServiceStop;
 pub use sspi::{LoopbackReport, SspiNegotiate, SspiPackage, run_loopback_handshake};
 pub use winhttp::WinHttpPacBackend;
 

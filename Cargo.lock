@@ -1159,6 +1159,7 @@ dependencies = [
 name = "zicade-win"
 version = "0.1.0"
 dependencies = [
+ "tokio",
  "windows",
  "zicade-auth",
  "zicade-routing",

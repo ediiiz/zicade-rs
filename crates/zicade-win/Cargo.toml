@@ -9,6 +9,7 @@ rust-version.workspace = true
 # `#![forbid(unsafe_code)]`. Every other crate does.
 
 [dependencies]
+tokio = { workspace = true }
 zicade-auth = { path = "../zicade-auth" }
 zicade-routing = { path = "../zicade-routing" }
 
@@ -18,6 +19,7 @@ windows = { workspace = true, features = [
     "Win32_Networking_WinHttp",
     "Win32_Security_Authentication_Identity",
     "Win32_Security_Credentials",
+    "Win32_System_Services",
     "Win32_System_Threading",
 ] }
 
