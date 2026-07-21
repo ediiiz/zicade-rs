@@ -280,6 +280,37 @@ async fn get_index_serves_html() {
     assert!(ct.starts_with("text/html"), "content-type was {ct}");
     let body = body_string(resp).await;
     assert!(body.contains("Zicade"), "index should mention Zicade");
+    // Self-contained: links the vendored Pico stylesheet same-origin, never a CDN.
+    assert!(
+        body.contains("/assets/pico.min.css"),
+        "index must link the local Pico stylesheet"
+    );
+    assert!(
+        !body.contains("cdn") && !body.contains("http://") && !body.contains("https://"),
+        "index must not reference any external URL"
+    );
+    // Progressive-disclosure inputs for every config section are present.
+    for field in [
+        "listen.host",
+        "listen.port",
+        "routing.mode",
+        "upstream.host",
+        "upstream.port",
+        "upstream.auth.mode",
+        "upstream.auth.package",
+        "upstream.auth.username",
+        "upstream.auth.password",
+        "pac.source",
+        "pac.path",
+        "pac.url",
+        "pac.failPolicy",
+        "pac.auth.mode",
+        "logging.level",
+        "logging.format",
+        "web.authRequired",
+    ] {
+        assert!(body.contains(field), "index form must expose {field}");
+    }
 }
 
 #[tokio::test]
