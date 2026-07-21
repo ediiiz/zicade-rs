@@ -58,8 +58,22 @@ pub(crate) enum Strategy {
 /// Choose the discovery [`Strategy`] from an [`IeProxyConfig`], applying the
 /// MSDN precedence: AutoConfigUrl > WPAD auto-detect > static proxy > direct.
 pub(crate) fn select_strategy(cfg: &IeProxyConfig) -> Strategy {
-    // STUB (red): real precedence implemented in the green step.
-    let _ = cfg;
+    if let Some(url) = cfg.auto_config_url.as_deref() {
+        if !url.trim().is_empty() {
+            return Strategy::ConfigUrl(url.to_owned());
+        }
+    }
+    if cfg.auto_detect {
+        return Strategy::Wpad;
+    }
+    if let Some(proxy) = cfg.proxy.as_deref() {
+        if !proxy.trim().is_empty() {
+            return Strategy::StaticProxy {
+                proxy: proxy.to_owned(),
+                bypass: cfg.bypass.clone(),
+            };
+        }
+    }
     Strategy::Direct
 }
 
@@ -73,42 +87,99 @@ pub(crate) struct StaticResolver {
 
 impl StaticResolver {
     /// Build a resolver from a manual proxy string and optional bypass list.
+    ///
+    /// The proxy string is parsed with the shared [`PacResult`] parser (it
+    /// accepts `host:port`, scheme-prefixed `http=host:port`, and `;`/space
+    /// separated lists, taking the first usable entry). The bypass list is split
+    /// on `;`/whitespace and lower-cased.
     pub(crate) fn new(proxy: &str, bypass: Option<&str>) -> Self {
-        let _ = (proxy, bypass);
-        // STUB (red)
+        let bypass = bypass
+            .map(|list| {
+                list.split([';', ' ', '\t', '\n', '\r'])
+                    .map(str::trim)
+                    .filter(|e| !e.is_empty())
+                    .map(str::to_ascii_lowercase)
+                    .collect()
+            })
+            .unwrap_or_default();
         Self {
-            proxy: PacResult::Direct,
-            bypass: Vec::new(),
+            proxy: PacResult::parse(proxy),
+            bypass,
         }
     }
 
     /// Resolve `url`: the static proxy, or DIRECT if the host is bypassed.
     pub(crate) fn resolve(&self, url: &str) -> PacResult {
-        let _ = url;
-        // STUB (red)
-        PacResult::Direct
+        let host = host_of(url);
+        if host_bypassed(&host, &self.bypass) {
+            return PacResult::Direct;
+        }
+        self.proxy.clone()
     }
 }
 
 /// Extract the lower-cased host from a URL (scheme/userinfo/port/path stripped).
 fn host_of(url: &str) -> String {
-    let _ = url;
-    // STUB (red)
-    String::new()
+    // Drop the scheme, if present.
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    // Authority ends at the first path/query/fragment delimiter.
+    let authority = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(after_scheme);
+    // Strip userinfo (everything up to and including the last '@').
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, hp)| hp);
+    // Strip the port. Bracketed IPv6 literals keep their contents.
+    let host = if let Some(stripped) = host_port.strip_prefix('[') {
+        stripped.split_once(']').map_or(host_port, |(h, _)| h)
+    } else {
+        host_port.split_once(':').map_or(host_port, |(h, _)| h)
+    };
+    host.to_ascii_lowercase()
 }
 
-/// True if `host` matches any entry in the parsed bypass list.
+/// True if `host` matches any entry in the parsed (lower-cased) bypass list.
+///
+/// Supported forms: `<local>` (any dotless host, i.e. no `.`), an exact
+/// (case-insensitive) match, and `*` wildcards matching any run of characters
+/// (e.g. `*.corp.local`, `10.*`). No CIDR/IP-range support.
 fn host_bypassed(host: &str, entries: &[String]) -> bool {
-    let _ = (host, entries);
-    // STUB (red)
-    false
+    entries.iter().any(|entry| {
+        if entry == "<local>" {
+            !host.contains('.')
+        } else {
+            wildcard_match(entry, host)
+        }
+    })
 }
 
 /// Glob match where `*` in `pattern` matches any (possibly empty) run of chars.
+/// Inputs are expected already lower-cased.
 fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let _ = (pattern, text);
-    // STUB (red)
-    false
+    if !pattern.contains('*') {
+        return pattern == text;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let last = parts.len() - 1;
+    // The segment before the first '*' must be a literal prefix.
+    let Some(mut rest) = text.strip_prefix(parts[0]) else {
+        return false;
+    };
+    for (i, part) in parts.iter().enumerate().skip(1) {
+        if i == last {
+            // The trailing segment (possibly empty) must be a suffix of what
+            // remains, so no earlier match is consumed past it.
+            return rest.ends_with(part);
+        }
+        if part.is_empty() {
+            continue;
+        }
+        match rest.find(part) {
+            Some(off) => rest = &rest[off + part.len()..],
+            None => return false,
+        }
+    }
+    true
 }
 
 #[cfg(test)]
