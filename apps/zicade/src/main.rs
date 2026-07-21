@@ -20,6 +20,8 @@ use zicade::{LOG_BUFFER_CAP, init_tracing};
 use zicade_config::Config;
 use zicade_observe::channel_layer;
 
+mod tray;
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match parse_args(&args) {
