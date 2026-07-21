@@ -62,8 +62,7 @@ fn upstream_negotiate_config() -> Config {
                 port,
                 auth: AuthConfig {
                     mode: AuthMode::Negotiate,
-                    username: None,
-                    password: None,
+                    ..Default::default()
                 },
             }),
             pac: None,

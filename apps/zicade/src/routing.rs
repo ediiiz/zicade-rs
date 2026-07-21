@@ -72,19 +72,31 @@ fn build_auth(auth: &AuthConfig, host: &str) -> UpstreamAuth {
             );
             UpstreamAuth::None
         }
-        AuthMode::Negotiate => UpstreamAuth::Negotiate(sspi_factory(host)),
+        AuthMode::Negotiate => {
+            let package = map_package(auth.package);
+            tracing::info!(?package, "upstream auth: SSPI Negotiate");
+            UpstreamAuth::Negotiate(sspi_factory(host, package))
+        }
     }
 }
 
-/// A per-connection factory building a fresh SSPI Negotiate authenticator.
+/// Map the config-level SSPI package onto the zicade-win runtime package.
+fn map_package(package: zicade_config::SspiPackage) -> zicade_win::SspiPackage {
+    match package {
+        zicade_config::SspiPackage::Ntlm => zicade_win::SspiPackage::Ntlm,
+        zicade_config::SspiPackage::Negotiate => zicade_win::SspiPackage::Negotiate,
+    }
+}
+
+/// A per-connection factory building a fresh SSPI authenticator for `package`.
 ///
 /// Construction failures (e.g. off-Windows) are deferred to `step` time via
 /// [`DeferredSspi`], matching the proxy's `AuthFactory` contract (the closure is
 /// infallible and returns a boxed authenticator).
-fn sspi_factory(host: &str) -> AuthFactory {
+fn sspi_factory(host: &str, package: zicade_win::SspiPackage) -> AuthFactory {
     let spn = format!("HTTP/{host}");
     Arc::new(move || {
-        Box::new(DeferredSspi(SspiNegotiate::new(Some(&spn))))
+        Box::new(DeferredSspi(SspiNegotiate::new(Some(&spn), package)))
             as Box<dyn UpstreamAuthenticator + Send>
     })
 }
@@ -92,6 +104,17 @@ fn sspi_factory(host: &str) -> AuthFactory {
 /// Wraps the fallible SSPI construction so any error surfaces on the first
 /// handshake `step` rather than at factory-call time.
 struct DeferredSspi(Result<SspiNegotiate, zicade_win::WinError>);
+
+impl UpstreamAuthenticator for DeferredSspi {
+    fn step(&mut self, challenge: Option<&[u8]>) -> Result<Vec<u8>, AuthError> {
+        match &mut self.0 {
+            Ok(inner) => inner.step(challenge),
+            Err(err) => Err(AuthError::Authenticator(format!(
+                "SSPI Negotiate initialization failed: {err}"
+            ))),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -103,16 +126,5 @@ mod tests {
     fn maps_config_package_onto_win_package() {
         assert_eq!(map_package(CfgPkg::Ntlm), WinPkg::Ntlm);
         assert_eq!(map_package(CfgPkg::Negotiate), WinPkg::Negotiate);
-    }
-}
-
-impl UpstreamAuthenticator for DeferredSspi {
-    fn step(&mut self, challenge: Option<&[u8]>) -> Result<Vec<u8>, AuthError> {
-        match &mut self.0 {
-            Ok(inner) => inner.step(challenge),
-            Err(err) => Err(AuthError::Authenticator(format!(
-                "SSPI Negotiate initialization failed: {err}"
-            ))),
-        }
     }
 }

@@ -150,8 +150,7 @@ fn build_routing_maps_direct_and_upstream() {
                 port: 8080,
                 auth: AuthConfig {
                     mode: AuthMode::None,
-                    username: None,
-                    password: None,
+                    ..Default::default()
                 },
             }),
             pac: None,
