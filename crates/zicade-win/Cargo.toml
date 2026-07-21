@@ -10,10 +10,12 @@ rust-version.workspace = true
 
 [dependencies]
 zicade-auth = { path = "../zicade-auth" }
+zicade-routing = { path = "../zicade-routing" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Foundation",
+    "Win32_Networking_WinHttp",
     "Win32_Security_Authentication_Identity",
     "Win32_Security_Credentials",
     "Win32_System_Threading",

@@ -6,6 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+zicade-config = { path = "../zicade-config" }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

@@ -552,6 +552,10 @@ dependencies = [
 [[package]]
 name = "zicade-routing"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "zicade-config",
+]
 
 [[package]]
 name = "zicade-web"
@@ -563,6 +567,7 @@ version = "0.1.0"
 dependencies = [
  "windows",
  "zicade-auth",
+ "zicade-routing",
 ]
 
 [[package]]
