@@ -4,13 +4,14 @@
 
 pub mod client;
 pub mod origin;
+pub mod upstream_fake;
 
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use zicade_proxy::{ProxyError, ProxyMetrics, ProxyServer};
+use zicade_proxy::{ProxyError, ProxyMetrics, ProxyServer, Routing};
 
 /// A proxy running on an ephemeral loopback port, with a handle to shut it down
 /// and inspect its live metrics.
@@ -29,10 +30,27 @@ impl TestProxy {
     }
 
     pub async fn spawn_with_timeout(shutdown_timeout: Duration) -> Self {
-        let server = ProxyServer::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind ephemeral port")
-            .with_shutdown_timeout(shutdown_timeout);
+        Self::start(
+            ProxyServer::bind("127.0.0.1:0".parse().unwrap())
+                .await
+                .expect("bind ephemeral port")
+                .with_shutdown_timeout(shutdown_timeout),
+        )
+    }
+
+    /// Bind on an ephemeral port and serve in the given routing mode (direct or
+    /// through a configured upstream proxy).
+    pub async fn spawn_with_routing(routing: Routing) -> Self {
+        Self::start(
+            ProxyServer::bind("127.0.0.1:0".parse().unwrap())
+                .await
+                .expect("bind ephemeral port")
+                .with_shutdown_timeout(Duration::from_millis(750))
+                .with_routing(routing),
+        )
+    }
+
+    fn start(server: ProxyServer) -> Self {
         let addr = server.local_addr();
         let metrics = server.metrics();
         let (tx, rx) = oneshot::channel::<()>();

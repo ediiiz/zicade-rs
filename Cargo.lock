@@ -537,6 +537,7 @@ version = "0.1.0"
 name = "zicade-proxy"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bytes",
  "http-body-util",
  "hyper",
@@ -544,6 +545,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "zicade-auth",
  "zicade-win",
 ]
 

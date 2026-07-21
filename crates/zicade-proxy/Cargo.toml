@@ -13,9 +13,11 @@ http-body-util = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+zicade-auth = { path = "../zicade-auth" }
 
 [dev-dependencies]
 zicade-win = { path = "../zicade-win" }
+base64 = { workspace = true }
 
 [lints]
 workspace = true
