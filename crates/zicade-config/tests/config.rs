@@ -109,6 +109,58 @@ fn auth_package_round_trips() {
     );
 }
 
+/// A minimal upstream config in `basic` auth mode carrying the given trailing
+/// JSON fields on the auth object (so username/password can be present/absent).
+fn basic_auth_json(auth_fields: &str) -> String {
+    format!(
+        r#"{{ "listen": {{ "host": "127.0.0.1", "port": 3129 }},
+              "routing": {{ "mode": "upstream",
+                            "upstream": {{ "host": "wp8080", "port": 8080,
+                                          "auth": {{ "mode": "basic"{auth_fields} }} }} }} }}"#
+    )
+}
+
+#[test]
+fn basic_auth_accepts_with_username() {
+    let cfg = from_json_str(&basic_auth_json(r#", "username": "svc""#)).unwrap();
+    cfg.validate(&ValidationCtx::windows())
+        .expect("basic with a username is valid");
+    let up = cfg.routing.upstream.as_ref().unwrap();
+    assert_eq!(up.auth.mode, AuthMode::Basic);
+}
+
+#[test]
+fn basic_auth_accepts_empty_password() {
+    // Some proxies accept an empty password; only the username is required.
+    let cfg = from_json_str(&basic_auth_json(r#", "username": "svc", "password": """#)).unwrap();
+    cfg.validate(&ValidationCtx::windows())
+        .expect("basic with username and empty password is valid");
+}
+
+#[test]
+fn basic_auth_rejects_missing_username() {
+    let cfg = from_json_str(&basic_auth_json("")).unwrap();
+    let err = cfg
+        .validate(&ValidationCtx::windows())
+        .expect_err("basic without a username must be rejected");
+    assert!(
+        matches!(err, ConfigError::MissingCredentials { .. }),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn basic_auth_rejects_empty_username() {
+    let cfg = from_json_str(&basic_auth_json(r#", "username": "  ""#)).unwrap();
+    let err = cfg
+        .validate(&ValidationCtx::windows())
+        .expect_err("basic with a blank username must be rejected");
+    assert!(
+        matches!(err, ConfigError::MissingCredentials { .. }),
+        "got {err:?}"
+    );
+}
+
 #[test]
 fn rejects_unknown_routing_mode() {
     let json = r#"{ "listen": { "host": "127.0.0.1", "port": 3129 },
