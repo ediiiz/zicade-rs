@@ -87,8 +87,55 @@ mod tests {
     }
 
     #[test]
-    fn empty_args_is_console_run() {
-        assert_eq!(parse_args(&[]), Command::Run { config_path: None });
+    fn empty_args_is_the_default_command() {
+        // Bare `zicade` (double-clicked or typed) is the no-subcommand default,
+        // which — and only which — branches on the double-click heuristic.
+        assert_eq!(parse_args(&[]), Command::Default);
+    }
+
+    #[test]
+    fn default_with_single_console_process_is_tray() {
+        // GetConsoleProcessList == 1 means we own a freshly-created console
+        // (double-click); the default command then runs in tray mode.
+        assert_eq!(launch_mode(1, &Command::Default), LaunchMode::Tray);
+    }
+
+    #[test]
+    fn default_with_multiple_console_processes_is_console() {
+        // Launched from an existing cmd/PowerShell: the console is shared, so
+        // GetConsoleProcessList > 1 and we stay in console mode.
+        assert_eq!(launch_mode(2, &Command::Default), LaunchMode::Console);
+        assert_eq!(launch_mode(3, &Command::Default), LaunchMode::Console);
+    }
+
+    #[test]
+    fn default_with_zero_console_processes_is_console() {
+        // No console attached at all (e.g. off-Windows or a detached process):
+        // never tray — fall back to console.
+        assert_eq!(launch_mode(0, &Command::Default), LaunchMode::Console);
+    }
+
+    #[test]
+    fn explicit_subcommands_never_enter_tray_regardless_of_count() {
+        // Only the no-subcommand default branches on the heuristic. Every
+        // explicit command stays console even when the count says "double-click".
+        for command in [
+            Command::Run { config_path: None },
+            Command::Run {
+                config_path: Some(PathBuf::from("C:\\cfg.json")),
+            },
+            Command::ServiceRun,
+            Command::ServiceInstall { name: None },
+            Command::ServiceUninstall { name: None },
+            Command::Help,
+            Command::Unknown("--nope".to_owned()),
+        ] {
+            assert_eq!(
+                launch_mode(1, &command),
+                LaunchMode::Console,
+                "explicit command entered tray mode: {command:?}"
+            );
+        }
     }
 
     #[test]
