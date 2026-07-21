@@ -33,8 +33,49 @@ pub enum Command {
 
 /// Parse `args` (process args with `argv[0]` stripped) into a [`Command`].
 pub fn parse_args(args: &[String]) -> Command {
-    let _ = args;
-    Command::Help
+    let Some(first) = args.first() else {
+        return Command::Run { config_path: None };
+    };
+    match first.as_str() {
+        "--help" | "-h" | "help" => Command::Help,
+        "run" => Command::Run {
+            config_path: args.get(1).map(PathBuf::from),
+        },
+        "service" => parse_service(&args[1..]),
+        // A leading flag we do not recognize is an error...
+        other if other.starts_with('-') => Command::Unknown(other.to_owned()),
+        // ...but any other bare token is treated as an explicit config path,
+        // preserving the original single-argument console behavior.
+        other => Command::Run {
+            config_path: Some(PathBuf::from(other)),
+        },
+    }
+}
+
+/// Parse the tail after the `service` keyword.
+fn parse_service(rest: &[String]) -> Command {
+    match rest.first().map(String::as_str) {
+        Some("run") => Command::ServiceRun,
+        Some("install") => Command::ServiceInstall {
+            name: parse_name(&rest[1..]),
+        },
+        Some("uninstall") => Command::ServiceUninstall {
+            name: parse_name(&rest[1..]),
+        },
+        Some(other) => Command::Unknown(format!("service {other}")),
+        None => Command::Unknown("service".to_owned()),
+    }
+}
+
+/// Scan `args` for `--name NAME`, returning the value if present.
+fn parse_name(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--name" {
+            return it.next().cloned();
+        }
+    }
+    None
 }
 
 #[cfg(test)]
