@@ -1,14 +1,20 @@
 #![forbid(unsafe_code)]
 
-//! Configuration schema, load/save, validation, and migration for Zicade.
+//! Configuration schema, load/save, and validation for Zicade (spec §5.3).
 //!
-//! The serde structs in this crate are the config schema (spec §5.3). Real
-//! behavior lands in M1; M0 only proves the crate compiles and tests run.
+//! The serde structs in [`model`] are the schema. [`Config::validate`] enforces
+//! the cross-field and platform rules (negotiate-is-Windows-only, required
+//! sections per routing mode, PAC-auth inheritance for selected upstreams).
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_scaffold_compiles() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+mod error;
+mod io;
+mod model;
+mod validate;
+
+pub use error::ConfigError;
+pub use io::{from_json_str, load_file, save_file, to_json_string};
+pub use model::{
+    AuthConfig, AuthMode, Config, FailPolicy, ListenConfig, LoggingConfig, PacConfig, PacSource,
+    RoutingConfig, RoutingMode, UpstreamConfig,
+};
+pub use validate::ValidationCtx;
