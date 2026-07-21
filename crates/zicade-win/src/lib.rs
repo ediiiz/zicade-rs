@@ -139,6 +139,18 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn sspi_new_acquires_for_both_packages() {
+        // Both selectable packages must yield a real outbound credential handle
+        // on this box (NTLM is always present; Negotiate is too on a domain box
+        // and standalone). Models `sspi_negotiate_links_and_acquires`.
+        for pkg in [SspiPackage::Ntlm, SspiPackage::Negotiate] {
+            SspiNegotiate::new(Some("HTTP/wp8080"), pkg)
+                .unwrap_or_else(|e| panic!("acquire {pkg:?} credential handle: {e}"));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn sspi_loopback_handshake_completes() {
         // LESSON-3: pair a real client (ISC) with a real server (ASC) on this
         // machine to produce GENUINE tokens and run the handshake to completion,
