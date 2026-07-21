@@ -42,12 +42,24 @@ pub fn probe_sspi_negotiate() -> Result<(), WinError> {
     imp::probe_sspi_negotiate()
 }
 
+/// Number of open OS handles in the current process, or `None` off-Windows.
+///
+/// Used by leak/soak tests to assert handle usage returns to baseline
+/// (LESSON-7: the prior build leaked handles, ~171→231 over 60 requests).
+pub fn process_handle_count() -> Option<u32> {
+    imp::process_handle_count()
+}
+
 #[cfg(not(windows))]
 mod imp {
     use super::WinError;
 
     pub(super) fn probe_sspi_negotiate() -> Result<(), WinError> {
         Err(WinError::UnsupportedPlatform)
+    }
+
+    pub(super) fn process_handle_count() -> Option<u32> {
+        None
     }
 }
 
@@ -86,6 +98,18 @@ mod imp {
             let _ = FreeCredentialsHandle(&cred);
         }
         Ok(())
+    }
+
+    pub(super) fn process_handle_count() -> Option<u32> {
+        use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
+
+        let mut count: u32 = 0;
+        // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no
+        // release; `count` is a valid, exclusively-borrowed out-pointer.
+        unsafe {
+            GetProcessHandleCount(GetCurrentProcess(), &mut count).ok()?;
+        }
+        Some(count)
     }
 }
 

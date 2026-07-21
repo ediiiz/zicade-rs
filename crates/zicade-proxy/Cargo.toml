@@ -6,6 +6,17 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+tokio = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+socket2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+zicade-win = { path = "../zicade-win" }
 
 [lints]
 workspace = true
