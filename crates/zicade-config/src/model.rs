@@ -12,6 +12,8 @@ pub struct Config {
     pub routing: RoutingConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub web: WebConfig,
 }
 
 /// Loopback listen address for the proxy.
@@ -157,6 +159,20 @@ pub struct AuthConfig {
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+}
+
+/// Web UI / local API configuration.
+///
+/// `auth_required` controls whether mutating endpoints (`PUT /api/config`)
+/// require the local `X-Zicade-Token` header. It defaults to **false**: the web
+/// server is loopback-only, so auth is normally unneeded. Set it to `true` to
+/// require the token (which also serves as CSRF protection). Read-only endpoints
+/// stay open on loopback regardless.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WebConfig {
+    /// Require the `X-Zicade-Token` header on mutations. Default `false`.
+    #[serde(default, rename = "authRequired")]
+    pub auth_required: bool,
 }
 
 /// Logging configuration.
