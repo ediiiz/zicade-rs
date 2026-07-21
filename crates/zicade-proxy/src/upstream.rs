@@ -37,6 +37,12 @@ pub type AuthFactory = Arc<dyn Fn() -> Box<dyn UpstreamAuthenticator + Send> + S
 pub enum UpstreamAuth {
     /// No proxy authentication (the upstream grants requests directly).
     None,
+    /// HTTP Basic. `credentials` is the ready-to-send `Proxy-Authorization`
+    /// value (`Basic base64(user:pass)`); it is sent preemptively.
+    Basic {
+        /// The complete `Proxy-Authorization` header value.
+        credentials: String,
+    },
     /// Negotiate (SPNEGO/Kerberos-NTLM) via a per-connection authenticator.
     Negotiate(AuthFactory),
 }
@@ -45,6 +51,8 @@ impl fmt::Debug for UpstreamAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => f.write_str("None"),
+            // Never print the credential.
+            Self::Basic { .. } => f.write_str("Basic"),
             Self::Negotiate(_) => f.write_str("Negotiate"),
         }
     }
@@ -88,10 +96,66 @@ impl UpstreamAuthenticator for BoxAuth {
     }
 }
 
-fn new_handshake(auth: &UpstreamAuth) -> Option<NegotiateHandshake<BoxAuth>> {
-    match auth {
-        UpstreamAuth::None => None,
-        UpstreamAuth::Negotiate(factory) => Some(NegotiateHandshake::new(BoxAuth(factory()))),
+/// Per-connection auth driver: chooses the `Proxy-Authorization` scheme and
+/// produces each leg's header value. This is where the scheme is selected by
+/// auth type — Negotiate builds `Negotiate <token>`, Basic sends its ready-made
+/// `Basic <b64>` value.
+enum AuthState {
+    None,
+    Basic { credentials: String, sent: bool },
+    Negotiate(NegotiateHandshake<BoxAuth>),
+}
+
+impl AuthState {
+    fn new(auth: &UpstreamAuth) -> Self {
+        match auth {
+            UpstreamAuth::None => AuthState::None,
+            UpstreamAuth::Basic { credentials } => AuthState::Basic {
+                credentials: credentials.clone(),
+                sent: false,
+            },
+            UpstreamAuth::Negotiate(factory) => {
+                AuthState::Negotiate(NegotiateHandshake::new(BoxAuth(factory())))
+            }
+        }
+    }
+
+    /// The `Proxy-Authorization` value to send preemptively on the first leg.
+    /// Only Basic sends preemptively; Negotiate opens with no auth.
+    fn initial_header(&mut self) -> Option<String> {
+        match self {
+            AuthState::Basic { credentials, sent } => {
+                *sent = true;
+                Some(credentials.clone())
+            }
+            AuthState::None | AuthState::Negotiate(_) => None,
+        }
+    }
+
+    /// Produce the next `Proxy-Authorization` value in response to a `407`, or an
+    /// error if this auth mode cannot (or should not) answer another challenge.
+    /// For Basic, a `407` after the credential was already sent means the
+    /// credential is wrong: fail cleanly rather than resend and loop.
+    fn on_challenge(&mut self, headers: &[(String, String)]) -> io::Result<String> {
+        match self {
+            AuthState::None => Err(io::Error::other(
+                "upstream demanded proxy auth but none is configured",
+            )),
+            AuthState::Basic { credentials, sent } => {
+                if *sent {
+                    Err(io::Error::other(
+                        "upstream rejected Basic proxy credentials",
+                    ))
+                } else {
+                    *sent = true;
+                    Ok(credentials.clone())
+                }
+            }
+            AuthState::Negotiate(handshake) => {
+                let token = advance_handshake(handshake, headers)?;
+                Ok(build_proxy_authorization(&token))
+            }
+        }
     }
 }
 
@@ -112,13 +176,11 @@ fn auth_io_err(err: AuthError) -> io::Error {
 }
 
 /// Drive one 407 leg: feed the challenge to the handshake and return the next
-/// `Proxy-Authorization` token, or an error if the handshake has no more work.
+/// Negotiate token, or an error if the handshake has no more work.
 fn advance_handshake(
-    handshake: Option<&mut NegotiateHandshake<BoxAuth>>,
+    handshake: &mut NegotiateHandshake<BoxAuth>,
     headers: &[(String, String)],
 ) -> io::Result<Vec<u8>> {
-    let handshake = handshake
-        .ok_or_else(|| io::Error::other("upstream demanded proxy auth but none is configured"))?;
     let challenge = negotiate_challenge(headers);
     match handshake
         .on_response(UpstreamResponse::ProxyAuthRequired { challenge })
@@ -139,11 +201,11 @@ pub(crate) async fn connect_via_upstream(
     auth: &UpstreamAuth,
 ) -> io::Result<TcpStream> {
     let mut stream = TcpStream::connect(upstream_addr).await?;
-    let mut handshake = new_handshake(auth);
-    let mut token: Option<Vec<u8>> = None;
+    let mut auth_state = AuthState::new(auth);
+    let mut header = auth_state.initial_header();
 
     for _ in 0..MAX_LEGS {
-        let head = connect_request(target, token.as_deref());
+        let head = connect_request(target, header.as_deref());
         wire::write_all(&mut stream, head.as_bytes()).await?;
         let (status, headers) = wire::read_head(&mut stream).await?;
 
@@ -152,7 +214,7 @@ pub(crate) async fn connect_via_upstream(
             407 => {
                 // Drain any body so the connection is clean for the next leg.
                 wire::read_body(&mut stream, &headers).await?;
-                token = Some(advance_handshake(handshake.as_mut(), &headers)?);
+                header = Some(auth_state.on_challenge(&headers)?);
             }
             other => {
                 wire::read_body(&mut stream, &headers).await?;
@@ -165,13 +227,10 @@ pub(crate) async fn connect_via_upstream(
     Err(io::Error::other("upstream handshake exhausted legs"))
 }
 
-fn connect_request(target: &str, token: Option<&[u8]>) -> String {
+fn connect_request(target: &str, auth_header: Option<&str>) -> String {
     let mut head = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
-    if let Some(token) = token {
-        head.push_str(&format!(
-            "Proxy-Authorization: {}\r\n",
-            build_proxy_authorization(token)
-        ));
+    if let Some(value) = auth_header {
+        head.push_str(&format!("Proxy-Authorization: {value}\r\n"));
     }
     head.push_str("\r\n");
     head
@@ -188,11 +247,11 @@ pub(crate) async fn forward_via_upstream(
     let body = body.collect().await?.to_bytes();
 
     let mut stream = TcpStream::connect(upstream_addr).await?;
-    let mut handshake = new_handshake(auth);
-    let mut token: Option<Vec<u8>> = None;
+    let mut auth_state = AuthState::new(auth);
+    let mut header = auth_state.initial_header();
 
     for _ in 0..MAX_LEGS {
-        let head = forward_request_head(&parts, body.len(), token.as_deref());
+        let head = forward_request_head(&parts, body.len(), header.as_deref());
         wire::write_all(&mut stream, head.as_bytes()).await?;
         wire::write_all(&mut stream, &body).await?;
 
@@ -200,7 +259,7 @@ pub(crate) async fn forward_via_upstream(
         let resp_body = wire::read_body(&mut stream, &headers).await?;
 
         if status == 407 {
-            token = Some(advance_handshake(handshake.as_mut(), &headers)?);
+            header = Some(auth_state.on_challenge(&headers)?);
             continue;
         }
         return build_response(status, &headers, resp_body);
@@ -208,7 +267,7 @@ pub(crate) async fn forward_via_upstream(
     Err("upstream handshake exhausted legs".into())
 }
 
-fn forward_request_head(parts: &Parts, body_len: usize, token: Option<&[u8]>) -> String {
+fn forward_request_head(parts: &Parts, body_len: usize, auth_header: Option<&str>) -> String {
     let mut head = format!("{} {} HTTP/1.1\r\n", parts.method, parts.uri);
     for (name, value) in &parts.headers {
         let key = name.as_str().to_ascii_lowercase();
@@ -229,11 +288,8 @@ fn forward_request_head(parts: &Parts, body_len: usize, token: Option<&[u8]>) ->
     }
     head.push_str(&format!("Content-Length: {body_len}\r\n"));
     head.push_str("Connection: keep-alive\r\n");
-    if let Some(token) = token {
-        head.push_str(&format!(
-            "Proxy-Authorization: {}\r\n",
-            build_proxy_authorization(token)
-        ));
+    if let Some(value) = auth_header {
+        head.push_str(&format!("Proxy-Authorization: {value}\r\n"));
     }
     head.push_str("\r\n");
     head
