@@ -2,7 +2,9 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use zicade_auth::header::{NegotiateOffer, build_proxy_authorization, parse_proxy_authenticate};
+use zicade_auth::header::{
+    NegotiateOffer, build_basic_authorization, build_proxy_authorization, parse_proxy_authenticate,
+};
 
 #[test]
 fn parses_bare_offer() {
@@ -36,6 +38,21 @@ fn non_negotiate_scheme_is_not_offered() {
         parse_proxy_authenticate("Basic realm=\"x\""),
         NegotiateOffer::NotOffered
     );
+}
+
+#[test]
+fn builds_basic_authorization_known_vector() {
+    // RFC 7617 canonical example.
+    assert_eq!(
+        build_basic_authorization("Aladdin", "open sesame"),
+        "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
+    );
+}
+
+#[test]
+fn builds_basic_authorization_allows_empty_password() {
+    let header = build_basic_authorization("user", "");
+    assert_eq!(header, format!("Basic {}", STANDARD.encode("user:")));
 }
 
 #[test]
