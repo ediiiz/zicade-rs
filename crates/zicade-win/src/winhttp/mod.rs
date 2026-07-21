@@ -7,6 +7,8 @@
 use zicade_routing::{PacBackend, PacResult, RoutingError};
 
 #[cfg(windows)]
+mod discovery;
+#[cfg(windows)]
 mod win;
 
 /// A PAC backend backed by WinHTTP auto-proxy resolution.
