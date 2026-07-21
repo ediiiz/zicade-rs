@@ -265,6 +265,36 @@ fn negotiate_in_pac_auth_also_checked() {
 }
 
 #[test]
+fn web_auth_required_defaults_false_when_absent() {
+    // Older configs without a `web` section must still load, auth defaulting OFF.
+    let cfg = from_json_str(FULL_EXAMPLE).expect("full example parses without a web section");
+    assert!(
+        !cfg.web.auth_required,
+        "web.authRequired must default to false when the section is absent"
+    );
+}
+
+#[test]
+fn web_auth_required_parses_when_present() {
+    let json = r#"{ "listen": { "host": "127.0.0.1", "port": 3129 },
+                    "routing": { "mode": "direct" },
+                    "web": { "authRequired": true } }"#;
+    let cfg = from_json_str(json).expect("web section parses");
+    assert!(cfg.web.auth_required, "web.authRequired must parse as true");
+}
+
+#[test]
+fn web_auth_required_round_trips() {
+    let json = r#"{ "listen": { "host": "127.0.0.1", "port": 3129 },
+                    "routing": { "mode": "direct" },
+                    "web": { "authRequired": true } }"#;
+    let cfg = from_json_str(json).unwrap();
+    let reparsed = from_json_str(&to_json_string(&cfg).unwrap()).unwrap();
+    assert_eq!(cfg, reparsed, "save then load must be lossless");
+    assert!(reparsed.web.auth_required);
+}
+
+#[test]
 fn pac_selected_upstream_inherits_pac_auth() {
     // LESSON-6: a PAC result pointing at a gateway must carry routing.pac.auth
     // so the handshake can run. Internal (DIRECT) hosts carry no upstream.
