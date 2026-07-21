@@ -23,6 +23,7 @@ use zicade_observe::channel_layer;
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match parse_args(&args) {
+        Command::Default => run_default(),
         Command::Run { config_path } => run_console(config_path),
         Command::ServiceRun => run_service(),
         Command::ServiceInstall { name } => install_service(name),
@@ -37,6 +38,12 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The no-subcommand default. Tray dispatch (double-click detection) is wired
+/// in a later step; for now the default serves in the console.
+fn run_default() -> ExitCode {
+    run_console(None)
 }
 
 /// Console mode (default): serve until Ctrl-C.

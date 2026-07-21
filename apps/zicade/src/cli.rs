@@ -14,9 +14,13 @@ pub const DEFAULT_SERVICE_NAME: &str = "Zicade";
 /// A parsed top-level command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// Console mode (the unchanged default): serve until Ctrl-C. An optional
-    /// explicit config path preserves the historical "first arg is the config
-    /// path" behavior.
+    /// No subcommand at all (bare `zicade`). This — and only this — branches on
+    /// the double-click heuristic ([`launch_mode`]): console when launched from
+    /// a terminal, tray when double-clicked. An explicit `run` is [`Run`] and
+    /// always stays console.
+    Default,
+    /// Console mode: serve until Ctrl-C. An optional explicit config path
+    /// preserves the historical "first arg is the config path" behavior.
     Run { config_path: Option<PathBuf> },
     /// Run under the Service Control Manager (`service run`): serve until the
     /// SCM sends STOP/SHUTDOWN.
@@ -31,10 +35,35 @@ pub enum Command {
     Unknown(String),
 }
 
+/// Where the "no subcommand" default should run: the unchanged console, or the
+/// system-tray (notification-area) mode used when the exe is double-clicked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchMode {
+    /// Serve in the console until Ctrl-C (the historical behavior).
+    Console,
+    /// Hide the console and run with a system-tray icon.
+    Tray,
+}
+
+/// Decide the launch mode from the number of processes attached to this
+/// process's console and the parsed [`Command`].
+///
+/// Pure and total so the whole dispatch rule is unit-testable without a desktop
+/// session. `console_process_count` is `GetConsoleProcessList`'s result: `1`
+/// means we own a freshly-created console (a double-click) and the *default*
+/// command runs in the tray; any other count, or any explicit subcommand,
+/// stays in the console.
+pub fn launch_mode(console_process_count: usize, command: &Command) -> LaunchMode {
+    match command {
+        Command::Default if console_process_count == 1 => LaunchMode::Tray,
+        _ => LaunchMode::Console,
+    }
+}
+
 /// Parse `args` (process args with `argv[0]` stripped) into a [`Command`].
 pub fn parse_args(args: &[String]) -> Command {
     let Some(first) = args.first() else {
-        return Command::Run { config_path: None };
+        return Command::Default;
     };
     match first.as_str() {
         "--help" | "-h" | "help" => Command::Help,
