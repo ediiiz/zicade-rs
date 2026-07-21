@@ -24,6 +24,7 @@ zicade-config = { path = "../../crates/zicade-config" }
 zicade-observe = { path = "../../crates/zicade-observe" }
 zicade-proxy = { path = "../../crates/zicade-proxy" }
 zicade-routing = { path = "../../crates/zicade-routing" }
+zicade-web = { path = "../../crates/zicade-web" }
 zicade-win = { path = "../../crates/zicade-win" }
 
 [dev-dependencies]

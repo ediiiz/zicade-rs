@@ -1078,6 +1078,7 @@ dependencies = [
  "zicade-observe",
  "zicade-proxy",
  "zicade-routing",
+ "zicade-web",
  "zicade-win",
 ]
 
