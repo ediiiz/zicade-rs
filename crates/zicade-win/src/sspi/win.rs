@@ -10,7 +10,7 @@ use windows::Win32::Security::Authentication::Identity::{
     ASC_REQ_ALLOCATE_MEMORY, ASC_REQ_CONNECTION, AcceptSecurityContext, AcquireCredentialsHandleW,
     DeleteSecurityContext, FreeContextBuffer, FreeCredentialsHandle, ISC_REQ_ALLOCATE_MEMORY,
     ISC_REQ_CONNECTION, InitializeSecurityContextW, SECBUFFER_TOKEN, SECBUFFER_VERSION,
-    SECPKG_CRED, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND, SECURITY_NATIVE_DREP, SecBuffer,
+    SECPKG_CRED, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND, SECURITY_NETWORK_DREP, SecBuffer,
     SecBufferDesc,
 };
 use windows::Win32::Security::Credentials::SecHandle;
@@ -18,6 +18,19 @@ use windows::core::{PCWSTR, w};
 
 use super::LoopbackReport;
 use crate::WinError;
+
+/// The SSPI security package used for upstream proxy authentication.
+///
+/// We use **NTLM** rather than **Negotiate** deliberately. The corporate McAfee /
+/// Skyhigh Secure Web Gateway offers `Negotiate`, `NTLM`, and `Basic`, but does
+/// not accept SPNEGO: sending a SPNEGO `NegTokenInit` makes it re-offer auth with
+/// no continuation token, and the Negotiate package's raw-NTLM fallback cannot
+/// consume the gateway's NTLM Type-2 challenge (it fails ISC with
+/// `SEC_E_INVALID_TOKEN`). The NTLM package completes the standard three-leg
+/// NTLM handshake and the gateway accepts the resulting token under either the
+/// `Negotiate` or `NTLM` scheme label. (There is no Kerberos SPN registered for
+/// the proxy appliance, so Negotiate/Kerberos buys us nothing here anyway.)
+const SSPI_PACKAGE: PCWSTR = w!("NTLM");
 
 fn sspi_err(e: windows::core::Error) -> WinError {
     WinError::Sspi(e.code().0)
@@ -34,7 +47,7 @@ fn acquire_cred(usage: SECPKG_CRED) -> Result<SecHandle, WinError> {
     unsafe {
         AcquireCredentialsHandleW(
             PCWSTR::null(),
-            w!("Negotiate"),
+            SSPI_PACKAGE,
             usage,
             None,
             None,
@@ -134,7 +147,7 @@ impl ClientContext {
                 target_ptr,
                 req,
                 0,
-                SECURITY_NATIVE_DREP,
+                SECURITY_NETWORK_DREP,
                 pinput,
                 0,
                 Some(&mut new_ctx),
@@ -199,7 +212,7 @@ impl ServerContext {
                 ctx_in,
                 Some(&in_desc),
                 req,
-                SECURITY_NATIVE_DREP,
+                SECURITY_NETWORK_DREP,
                 Some(&mut new_ctx),
                 Some(&mut out_desc),
                 &mut attrs,
