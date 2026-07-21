@@ -93,6 +93,19 @@ fn sspi_factory(host: &str) -> AuthFactory {
 /// handshake `step` rather than at factory-call time.
 struct DeferredSspi(Result<SspiNegotiate, zicade_win::WinError>);
 
+#[cfg(test)]
+mod tests {
+    use super::map_package;
+    use zicade_config::SspiPackage as CfgPkg;
+    use zicade_win::SspiPackage as WinPkg;
+
+    #[test]
+    fn maps_config_package_onto_win_package() {
+        assert_eq!(map_package(CfgPkg::Ntlm), WinPkg::Ntlm);
+        assert_eq!(map_package(CfgPkg::Negotiate), WinPkg::Negotiate);
+    }
+}
+
 impl UpstreamAuthenticator for DeferredSspi {
     fn step(&mut self, challenge: Option<&[u8]>) -> Result<Vec<u8>, AuthError> {
         match &mut self.0 {
