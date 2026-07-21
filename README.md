@@ -146,11 +146,13 @@ rather than failing when `WinHttpGetProxyForUrl` reports no discoverable script.
 
 ## Known limitations
 
-- **PAC data-path routing is not yet wired.** In `mode = "pac"` the app builds
-  and validates the WinHTTP `RouteResolver`, logs that PAC is configured, and
-  then runs the proxy in **Direct** mode. Per-request PAC selection in the proxy
-  data path is deferred (the resolver + WinHTTP backend themselves are covered by
-  tests). Use `mode = "upstream"` for a fixed upstream proxy.
+- **PAC data-path routing is wired.** In `mode = "pac"` the proxy resolves each
+  request through WinHTTP and connects DIRECT or through the resolved upstream
+  (applying `routing.pac.auth`, LESSON-6). `source = "auto"` uses WPAD
+  auto-detect; hosts with no discoverable WPAD script need `source = "url"` (or
+  `"file"`) to point at the PAC explicitly. `failPolicy` governs resolution
+  failures: `"direct"` falls back to a DIRECT connection, `"error"` fails the
+  request with `502`. PAC results are not cached (each request re-resolves).
 - **Basic upstream auth is not wired.** `auth.mode = "basic"` currently logs a
   warning and proceeds **without** proxy authentication. Use `negotiate` (or
   `none`). `none` and `negotiate` are fully wired.
