@@ -118,13 +118,31 @@ impl UpstreamAuthenticator for DeferredSspi {
 
 #[cfg(test)]
 mod tests {
-    use super::map_package;
-    use zicade_config::SspiPackage as CfgPkg;
+    use super::{build_auth, map_package};
+    use zicade_config::{AuthConfig, AuthMode, SspiPackage as CfgPkg};
     use zicade_win::SspiPackage as WinPkg;
 
     #[test]
     fn maps_config_package_onto_win_package() {
         assert_eq!(map_package(CfgPkg::Ntlm), WinPkg::Ntlm);
         assert_eq!(map_package(CfgPkg::Negotiate), WinPkg::Negotiate);
+    }
+
+    #[test]
+    fn basic_mode_builds_basic_upstream_auth() {
+        let auth = AuthConfig {
+            mode: AuthMode::Basic,
+            package: CfgPkg::default(),
+            username: Some("svc".to_owned()),
+            password: Some("secret".to_owned()),
+        };
+        // Debug never leaks the credential; it just names the scheme.
+        assert_eq!(format!("{:?}", build_auth(&auth, "wp8080")), "Basic");
+    }
+
+    #[test]
+    fn none_mode_builds_none_upstream_auth() {
+        let auth = AuthConfig::default();
+        assert_eq!(format!("{:?}", build_auth(&auth, "wp8080")), "None");
     }
 }
