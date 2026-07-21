@@ -7,6 +7,39 @@
 //! the tray on the main thread, feeding the existing graceful-shutdown signal
 //! when "Close" is chosen.
 
+use zicade_win::tray::TrayMenuItem;
+
+/// Command id for the "Open WebUI" menu item.
+pub const OPEN_WEBUI_ID: u32 = 1;
+/// Command id for the "Close" menu item.
+pub const CLOSE_ID: u32 = 2;
+
+/// What a clicked menu item should do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayAction {
+    /// Open the web UI in the default browser.
+    OpenWebUi,
+    /// Trigger graceful shutdown and exit.
+    Close,
+}
+
+/// The exactly-two right-click menu items, in display order.
+pub fn tray_menu_items() -> Vec<TrayMenuItem> {
+    vec![
+        TrayMenuItem::new(OPEN_WEBUI_ID, "Open WebUI"),
+        TrayMenuItem::new(CLOSE_ID, "Close"),
+    ]
+}
+
+/// Map a clicked menu command id to its [`TrayAction`], or `None` if unknown.
+pub fn tray_action(id: u32) -> Option<TrayAction> {
+    match id {
+        OPEN_WEBUI_ID => Some(TrayAction::OpenWebUi),
+        CLOSE_ID => Some(TrayAction::Close),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
