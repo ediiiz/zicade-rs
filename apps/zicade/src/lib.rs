@@ -10,6 +10,7 @@
 //! start-then-serve convenience used by `main`.
 
 mod app;
+mod pac_router;
 mod routing;
 
 use std::future::Future;
