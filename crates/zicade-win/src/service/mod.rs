@@ -57,7 +57,22 @@ impl ServiceStop {
     /// Resolve once a stop has been signalled (returning immediately if it
     /// already has). Await this as the app's shutdown future.
     pub async fn wait(&self) {
-        // Stub (red): does not actually wait.
+        loop {
+            // Register with the notifier BEFORE re-checking the flag, so a
+            // `trigger()` racing between the check and the await cannot be
+            // missed (`notify_waiters` only wakes already-registered waiters).
+            let notified = self.inner.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
+            if self.inner.stopped.load(Ordering::SeqCst) {
+                return;
+            }
+            notified.await;
+            if self.inner.stopped.load(Ordering::SeqCst) {
+                return;
+            }
+        }
     }
 }
 
