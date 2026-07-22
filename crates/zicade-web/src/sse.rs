@@ -1,10 +1,13 @@
-//! Server-sent events stream of `LogEvent`s for the live-log panel.
+//! Server-sent events: a `LogEvent` stream for the live-log panel, and a 1 Hz
+//! status/metrics stream for the status panel + throughput chart.
 
 use std::convert::Infallible;
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::response::sse::{Event, Sse};
-use tokio_stream::wrappers::BroadcastStream;
+use tokio::time::interval;
+use tokio_stream::wrappers::{BroadcastStream, IntervalStream};
 use tokio_stream::{Stream, StreamExt};
 
 use crate::state::AppState;
@@ -21,6 +24,20 @@ pub(crate) async fn sse_logs(
             .ok()
             .map(|json| Ok(Event::default().data(json))),
         Err(_lagged) => None,
+    });
+    Sse::new(stream)
+}
+
+/// `GET /events/metrics` — push a full [`StatusSnapshot`] as a JSON `data:`
+/// event once per second. The client derives throughput (bytes/sec) from the
+/// deltas between consecutive `bytes_in`/`bytes_out` samples. The first tick
+/// fires immediately, so the panel paints without waiting a second.
+pub(crate) async fn sse_metrics(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream = IntervalStream::new(interval(Duration::from_secs(1))).map(move |_| {
+        let json = serde_json::to_string(&state.status_snapshot()).unwrap_or_default();
+        Ok(Event::default().data(json))
     });
     Sse::new(stream)
 }

@@ -43,7 +43,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
 axum = "0.8"
 tower = { version = "0.5", features = ["util"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-stream = { version = "0.1", features = ["sync", "time"] }
 rust-embed = "8"
 rand = "0.9"
 

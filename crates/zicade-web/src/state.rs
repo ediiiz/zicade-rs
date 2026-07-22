@@ -16,6 +16,10 @@ pub trait MetricsSource: Send + Sync {
     fn active_connections(&self) -> usize;
     /// Requests that failed since start.
     fn failed_requests(&self) -> u64;
+    /// Cumulative bytes streamed back to clients (download).
+    fn bytes_in(&self) -> u64;
+    /// Cumulative bytes streamed out to origins/upstreams (upload).
+    fn bytes_out(&self) -> u64;
 }
 
 /// A side-effecting hook run when a validated config is applied live.
@@ -43,6 +47,10 @@ pub struct StatusSnapshot {
     pub requests_failed: u64,
     /// Connections currently being served.
     pub active_connections: usize,
+    /// Cumulative bytes streamed back to clients (download).
+    pub bytes_in: u64,
+    /// Cumulative bytes streamed out to origins/upstreams (upload).
+    pub bytes_out: u64,
 }
 
 /// Cloneable handle (all fields are `Arc`-backed) passed to every handler.
@@ -140,6 +148,8 @@ impl AppState {
             snapshot.requests_total = metrics.total_requests();
             snapshot.active_connections = metrics.active_connections();
             snapshot.requests_failed = metrics.failed_requests();
+            snapshot.bytes_in = metrics.bytes_in();
+            snapshot.bytes_out = metrics.bytes_out();
         }
         snapshot
     }

@@ -45,9 +45,9 @@ async fn proxy_service(
 ) -> Response<BoxedBody> {
     if req.method() == Method::CONNECT {
         return match &routing {
-            Routing::Direct => handle_connect(req),
-            Routing::Upstream(target) => handle_connect_upstream(req, target).await,
-            Routing::Pac(router) => handle_connect_pac(req, router).await,
+            Routing::Direct => handle_connect(req, metrics),
+            Routing::Upstream(target) => handle_connect_upstream(req, target, metrics).await,
+            Routing::Pac(router) => handle_connect_pac(req, router, metrics).await,
         };
     }
     metrics.incr_request();
@@ -71,13 +71,17 @@ async fn proxy_service(
 /// PAC-mode `CONNECT`: resolve the target through the injected router, then
 /// dispatch to the SAME direct/upstream handlers. The PAC input URL is
 /// synthesized from the CONNECT authority as `https://host:port`.
-async fn handle_connect_pac(req: Request<Incoming>, router: &PacRouter) -> Response<BoxedBody> {
+async fn handle_connect_pac(
+    req: Request<Incoming>,
+    router: &PacRouter,
+    metrics: ProxyMetrics,
+) -> Response<BoxedBody> {
     let Some(dst) = authority_target(req.uri()) else {
         return error_response(StatusCode::BAD_REQUEST);
     };
     match router(format!("https://{dst}")).await {
-        Ok(RouteChoice::Direct) => handle_connect(req),
-        Ok(RouteChoice::Upstream(target)) => handle_connect_upstream(req, &target).await,
+        Ok(RouteChoice::Direct) => handle_connect(req, metrics),
+        Ok(RouteChoice::Upstream(target)) => handle_connect_upstream(req, &target, metrics).await,
         Err(err) => {
             tracing::warn!(error = %err, dst, "PAC resolution failed for CONNECT");
             error_response(StatusCode::BAD_GATEWAY)
@@ -106,6 +110,7 @@ async fn forward_pac(
 async fn handle_connect_upstream(
     req: Request<Incoming>,
     target: &UpstreamTarget,
+    metrics: ProxyMetrics,
 ) -> Response<BoxedBody> {
     let Some(dst) = authority_target(req.uri()) else {
         return error_response(StatusCode::BAD_REQUEST);
@@ -120,7 +125,7 @@ async fn handle_connect_upstream(
     tokio::spawn(async move {
         match hyper::upgrade::on(req).await {
             Ok(upgraded) => {
-                if let Err(err) = tunnel::splice(upgraded, peer).await {
+                if let Err(err) = tunnel::splice(upgraded, peer, &metrics).await {
                     tracing::debug!(error = %err, dst, "upstream tunnel closed with error");
                 }
             }
@@ -132,14 +137,14 @@ async fn handle_connect_upstream(
 
 /// On `CONNECT host:port`, reply 200 and splice the upgraded connection to the
 /// origin (direct mode).
-fn handle_connect(req: Request<Incoming>) -> Response<BoxedBody> {
+fn handle_connect(req: Request<Incoming>, metrics: ProxyMetrics) -> Response<BoxedBody> {
     let Some(target) = authority_target(req.uri()) else {
         return error_response(StatusCode::BAD_REQUEST);
     };
     tokio::spawn(async move {
         match hyper::upgrade::on(req).await {
             Ok(upgraded) => {
-                if let Err(err) = tunnel::tunnel(upgraded, &target).await {
+                if let Err(err) = tunnel::tunnel(upgraded, &target, &metrics).await {
                     tracing::debug!(error = %err, target, "tunnel closed with error");
                 }
             }

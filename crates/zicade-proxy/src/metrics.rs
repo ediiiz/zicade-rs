@@ -12,6 +12,8 @@ pub struct ProxyMetrics {
     active: Arc<AtomicUsize>,
     total_requests: Arc<AtomicU64>,
     failed_requests: Arc<AtomicU64>,
+    bytes_in: Arc<AtomicU64>,
+    bytes_out: Arc<AtomicU64>,
 }
 
 impl ProxyMetrics {
@@ -36,6 +38,26 @@ impl ProxyMetrics {
 
     pub(crate) fn incr_failed(&self) {
         self.failed_requests.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Total bytes streamed FROM origins/upstreams back to clients (download).
+    pub fn bytes_in(&self) -> u64 {
+        self.bytes_in.load(Ordering::Relaxed)
+    }
+
+    /// Total bytes streamed FROM clients out to origins/upstreams (upload).
+    pub fn bytes_out(&self) -> u64 {
+        self.bytes_out.load(Ordering::Relaxed)
+    }
+
+    /// Add tunneled byte counts (see [`Self::bytes_in`]/[`Self::bytes_out`]).
+    pub(crate) fn add_bytes(&self, inbound: u64, outbound: u64) {
+        if inbound > 0 {
+            self.bytes_in.fetch_add(inbound, Ordering::Relaxed);
+        }
+        if outbound > 0 {
+            self.bytes_out.fetch_add(outbound, Ordering::Relaxed);
+        }
     }
 
     /// Register a new active connection; the returned guard decrements the
@@ -71,5 +93,15 @@ mod tests {
         assert_eq!(metrics.failed_requests(), 2);
         // Failures are counted independently of total requests.
         assert_eq!(metrics.total_requests(), 0);
+    }
+
+    #[test]
+    fn add_bytes_accumulates_each_direction() {
+        let metrics = ProxyMetrics::default();
+        assert_eq!((metrics.bytes_in(), metrics.bytes_out()), (0, 0));
+        metrics.add_bytes(100, 40);
+        metrics.add_bytes(0, 60); // upload-only chunk; zero inbound is a no-op
+        assert_eq!(metrics.bytes_in(), 100);
+        assert_eq!(metrics.bytes_out(), 100);
     }
 }

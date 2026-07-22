@@ -32,6 +32,14 @@ impl MetricsSource for ProxyMetricsSource {
     fn failed_requests(&self) -> u64 {
         self.0.failed_requests()
     }
+
+    fn bytes_in(&self) -> u64 {
+        self.0.bytes_in()
+    }
+
+    fn bytes_out(&self) -> u64 {
+        self.0.bytes_out()
+    }
 }
 
 /// A started application with both listeners bound and ready to serve.
@@ -108,9 +116,7 @@ impl App {
         state.set_status(StatusSnapshot {
             routing_mode: routing_mode.to_owned(),
             listen_addr: proxy_addr.to_string(),
-            requests_total: 0,
-            requests_failed: 0,
-            active_connections: 0,
+            ..StatusSnapshot::default()
         });
 
         Ok(Self {
