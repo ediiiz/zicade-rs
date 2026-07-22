@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/ediiiz/zicade-rs/compare/v0.3.0...v0.3.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **installer:** install the exe as zicade.exe ([c4c1533](https://github.com/ediiiz/zicade-rs/commit/c4c1533d67f9a47dc2608c4ac72cbd187ce9f511))
+* **installer:** install the exe as zicade.exe ([ffc7068](https://github.com/ediiiz/zicade-rs/commit/ffc7068224116803ba7ed4d82b285c6a94a47ef6))
+
 ## [0.3.0](https://github.com/ediiiz/zicade-rs/compare/v0.2.1...v0.3.0) (2026-07-22)
 
 
