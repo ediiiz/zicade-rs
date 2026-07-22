@@ -81,28 +81,35 @@
       <!-- Start on login: a Run-key value pointing at the bare exe. Launched
            this way, Zicade's console-detection heuristic starts it in tray
            mode. HKMU maps to HKLM (all users) or HKCU (per-user) by scope.
-           Installed only when STARTONLOGIN is set. -->
+           The target is referenced by directory ([APPLICATIONFOLDER], resolved
+           per scope at install time) rather than [#zicadeExe] to avoid a
+           cross-component reference (ICE69). Installed only when STARTONLOGIN
+           is set. -->
       <Component Id="StartOnLogin" Guid="*">
         <Condition>STARTONLOGIN = "1"</Condition>
         <RegistryValue Root="HKMU"
                        Key="Software\Microsoft\Windows\CurrentVersion\Run"
                        Name="Zicade"
                        Type="string"
-                       Value="&quot;[#zicadeExe]&quot;"
+                       Value="&quot;[APPLICATIONFOLDER]zicade.exe&quot;"
                        KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="ZicadeMenuFolder">
+      <!-- A shortcut is per-user data, so ICE57 requires the component's
+           keypath to be unambiguously per-user: use an HKCU registry value
+           (not HKMU). The target is referenced by directory rather than
+           [#zicadeExe] to avoid a cross-component reference (ICE69). -->
       <Component Id="StartMenuShortcut" Guid="*">
         <Shortcut Id="ZicadeShortcut"
                   Name="Zicade"
                   Description="Local forwarding HTTP/HTTPS proxy"
-                  Target="[#zicadeExe]"
+                  Target="[APPLICATIONFOLDER]zicade.exe"
                   WorkingDirectory="APPLICATIONFOLDER"
                   Icon="ZicadeIcon.ico" />
         <RemoveFolder Id="RemoveZicadeMenuFolder" On="uninstall" />
-        <RegistryValue Root="HKMU"
+        <RegistryValue Root="HKCU"
                        Key="Software\Zicade"
                        Name="installed"
                        Type="integer"
