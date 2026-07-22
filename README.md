@@ -185,6 +185,15 @@ requires a username, and `negotiate` auth is only accepted on Windows.
   shown inline.
 - **Read-only** endpoints (`GET /api/config`, `GET /api/status`,
   `GET /events/logs` SSE) are open on loopback.
+- A **live status panel** shows the active routing mode, listen address, total
+  and failed request counts, active connections, and current in/out throughput
+  with a 60-second inline-SVG sparkline. It is driven by a `GET /events/metrics`
+  SSE stream (one `StatusSnapshot` per second; the client derives byte/s from the
+  cumulative `bytes_in`/`bytes_out` deltas) and shows a reachable/unreachable dot.
+  Throughput currently reflects `CONNECT`-tunnelled (HTTPS) bytes, counted from
+  the tunnel's bidirectional copy. Routing/auth edits saved from the form apply
+  to the running proxy without a restart; a listen host/port change still needs
+  a restart.
 
 ### Web-UI auth (`web.authRequired`, default **off**)
 

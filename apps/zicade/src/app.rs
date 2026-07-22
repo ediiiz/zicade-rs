@@ -12,9 +12,35 @@ use tokio::sync::watch;
 use zicade_config::{Config, RoutingMode, ValidationCtx};
 use zicade_observe::LogStore;
 use zicade_proxy::ProxyServer;
-use zicade_web::{AppState, StatusSnapshot, load_or_create_token, router};
+use zicade_web::{AppState, MetricsSource, StatusSnapshot, load_or_create_token, router};
 
 use crate::routing::build_routing;
+
+/// Adapts the proxy's live [`zicade_proxy::ProxyMetrics`] to the web crate's
+/// [`MetricsSource`] trait so `GET /api/status` reports real counters.
+struct ProxyMetricsSource(zicade_proxy::ProxyMetrics);
+
+impl MetricsSource for ProxyMetricsSource {
+    fn total_requests(&self) -> u64 {
+        self.0.total_requests()
+    }
+
+    fn active_connections(&self) -> usize {
+        self.0.active_connections()
+    }
+
+    fn failed_requests(&self) -> u64 {
+        self.0.failed_requests()
+    }
+
+    fn bytes_in(&self) -> u64 {
+        self.0.bytes_in()
+    }
+
+    fn bytes_out(&self) -> u64 {
+        self.0.bytes_out()
+    }
+}
 
 /// A started application with both listeners bound and ready to serve.
 pub struct App {
@@ -55,6 +81,22 @@ impl App {
             .with_routing(routing);
         let proxy_addr = proxy.local_addr();
 
+        // A live handle to the proxy's routing, captured before `proxy` is
+        // moved into `Self`. The apply hook rebuilds routing from the new
+        // config and swaps it here, so UI edits take effect without a restart.
+        let routing_handle = proxy.routing_handle();
+        let apply_handle = routing_handle.clone();
+        let hook: zicade_web::ConfigApplyHook =
+            std::sync::Arc::new(move |cfg: &zicade_config::Config| {
+                match crate::routing::build_routing(cfg) {
+                    Ok(routing) => apply_handle.set(routing),
+                    Err(err) => tracing::error!(
+                        error = %format!("{err:#}"),
+                        "failed to rebuild routing on live config apply"
+                    ),
+                }
+            });
+
         // The web server sits on the proxy port + 1 (both loopback).
         let web_port = proxy_addr
             .port()
@@ -65,12 +107,16 @@ impl App {
             .context("failed to bind the web listener")?;
         let web_addr = web_listener.local_addr()?;
 
+        // Capture the live metrics handle before `proxy` is moved into `Self`.
+        let metrics = proxy.metrics();
+
         let state = AppState::new(config, config_path, token, logs);
+        let state = state.with_metrics_source(std::sync::Arc::new(ProxyMetricsSource(metrics)));
+        let state = state.with_apply_hook(hook);
         state.set_status(StatusSnapshot {
             routing_mode: routing_mode.to_owned(),
             listen_addr: proxy_addr.to_string(),
-            requests_total: 0,
-            requests_failed: 0,
+            ..StatusSnapshot::default()
         });
 
         Ok(Self {

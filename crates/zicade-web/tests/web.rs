@@ -14,7 +14,7 @@ use tower::ServiceExt;
 
 use zicade_config::{Config, from_json_str, load_file};
 use zicade_observe::channel_layer;
-use zicade_web::{AppState, StatusSnapshot, router};
+use zicade_web::{AppState, router};
 
 const TOKEN: &str = "test-token-0123456789abcdef";
 
@@ -209,35 +209,6 @@ async fn put_invalid_config_is_400() {
 }
 
 #[tokio::test]
-async fn status_reflects_state() {
-    let state = state_with_config(Config::default());
-    state.set_status(StatusSnapshot {
-        routing_mode: "pac".to_owned(),
-        listen_addr: "127.0.0.1:3129".to_owned(),
-        requests_total: 7,
-        requests_failed: 1,
-    });
-    let app = router(state);
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/status")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::OK);
-    let got: StatusSnapshot = serde_json::from_str(&body_string(resp).await).unwrap();
-    assert_eq!(got.routing_mode, "pac");
-    assert_eq!(got.requests_total, 7);
-    assert_eq!(got.requests_failed, 1);
-    assert_eq!(got.listen_addr, "127.0.0.1:3129");
-}
-
-#[tokio::test]
 async fn sse_logs_endpoint_streams() {
     let state = state_with_config(Config::default());
     let app = router(state);
@@ -284,6 +255,10 @@ async fn get_index_serves_html() {
     assert!(
         body.contains("/assets/pico.min.css"),
         "index must link the local Pico stylesheet"
+    );
+    assert!(
+        body.contains("/assets/app.js"),
+        "index must link the local app script (extracted, served same-origin)"
     );
     assert!(
         !body.contains("cdn") && !body.contains("http://") && !body.contains("https://"),

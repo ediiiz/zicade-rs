@@ -30,6 +30,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/config", get(handlers::get_config))
         .route("/api/status", get(handlers::get_status))
         .route("/events/logs", get(sse::sse_logs))
+        .route("/events/metrics", get(sse::sse_metrics))
         .route("/", get(assets::index))
         .route("/assets/{*path}", get(assets::asset))
         .merge(gated)

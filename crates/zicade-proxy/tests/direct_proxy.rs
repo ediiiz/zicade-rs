@@ -77,14 +77,32 @@ async fn post_body_integrity_small_large_chunked() {
 async fn connect_tunnel_round_trip() {
     let echo = origin::spawn_tcp_echo().await;
     let proxy = TestProxy::spawn().await;
+    let metrics = proxy.metrics.clone();
 
+    let payload = b"ping-through-tunnel";
     let mut tunnel = proxy_connect(proxy.addr, &echo.to_string()).await;
-    tunnel.write_all(b"ping-through-tunnel").await.unwrap();
-    let mut buf = vec![0u8; b"ping-through-tunnel".len()];
+    tunnel.write_all(payload).await.unwrap();
+    let mut buf = vec![0u8; payload.len()];
     tunnel.read_exact(&mut buf).await.unwrap();
-    assert_eq!(&buf, b"ping-through-tunnel");
+    assert_eq!(&buf, payload);
 
+    // Closing the client ends the tunnel; the (detached) splice task tallies the
+    // bytes on close, so poll briefly until the counters settle.
     drop(tunnel);
+    let n = payload.len() as u64;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while (metrics.bytes_out() < n || metrics.bytes_in() < n)
+        && std::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        metrics.bytes_out(),
+        n,
+        "client→origin bytes must be counted"
+    );
+    assert_eq!(metrics.bytes_in(), n, "origin→client bytes must be counted");
+
     proxy.shutdown().await.unwrap();
 }
 
