@@ -13,7 +13,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-use zicade_config::Config;
+use zicade_config::{Config, RoutingMode, UpstreamConfig};
 use zicade_observe::channel_layer;
 use zicade_web::{AppState, ConfigApplyHook, router};
 
@@ -105,5 +105,57 @@ async fn put_invalid_config_does_not_invoke_apply_hook() {
     assert!(
         spy.lock().unwrap().is_none(),
         "apply hook must NOT run for an invalid config"
+    );
+}
+
+#[tokio::test]
+async fn put_config_updates_reported_routing_mode() {
+    // A live routing change must be reflected by GET /api/status, not just
+    // persisted — otherwise the status contradicts the applied routing.
+    let (state, _spy) = state_with_spy(Config::default()); // default routing = direct
+    let app = router(state);
+
+    let mut new_cfg = Config::default();
+    new_cfg.routing.mode = RoutingMode::Upstream;
+    new_cfg.routing.upstream = Some(UpstreamConfig {
+        host: "proxy.example.com".to_owned(),
+        port: 8080,
+        auth: Default::default(), // mode = none: valid on any platform
+    });
+    let body = zicade_config::to_json_string(&new_cfg).unwrap();
+
+    let put = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/config")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put.status(), StatusCode::OK);
+
+    let status = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+
+    let bytes = axum::body::to_bytes(status.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(
+        text.contains(r#""routing_mode":"upstream""#),
+        "status should report the live-applied routing mode, got: {text}"
     );
 }

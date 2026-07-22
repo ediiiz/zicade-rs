@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use zicade_config::Config;
+use zicade_config::{Config, RoutingMode};
 use zicade_observe::LogStore;
 
 /// A source of live proxy metrics the status endpoint can overlay onto its
@@ -146,12 +146,28 @@ impl AppState {
 
     /// Replace the in-memory config after a validated update, first running the
     /// apply hook (if any) so live routing is rebuilt from the new config.
+    ///
+    /// Also refreshes the status snapshot's `routing_mode` so `GET /api/status`
+    /// reflects the just-applied routing. `listen_addr` is left untouched: it is
+    /// the actually-bound address, and a listen change requires a restart.
     pub(crate) fn apply_config(&self, config: Config) {
         if let Some(hook) = &self.apply_hook {
             hook(&config);
         }
+        if let Ok(mut status) = self.status.lock() {
+            status.routing_mode = routing_mode_label(config.routing.mode).to_owned();
+        }
         if let Ok(mut guard) = self.config.lock() {
             *guard = config;
         }
+    }
+}
+
+/// The stable string label for a routing mode, as surfaced in the status.
+fn routing_mode_label(mode: RoutingMode) -> &'static str {
+    match mode {
+        RoutingMode::Direct => "direct",
+        RoutingMode::Upstream => "upstream",
+        RoutingMode::Pac => "pac",
     }
 }
