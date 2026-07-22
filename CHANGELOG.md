@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/ediiiz/zicade-rs/compare/v0.2.0...v0.2.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **installer:** resolve ICE57/ICE69 in the WiX source ([c64913f](https://github.com/ediiiz/zicade-rs/commit/c64913fb1aefc7264f2a8e1525e7eed77cfff045))
+* **installer:** resolve ICE57/ICE69 in the WiX source ([85c5c83](https://github.com/ediiiz/zicade-rs/commit/85c5c8359fd3f145126190da0cff3bbc4bbef24e))
+
 ## [0.2.0](https://github.com/ediiiz/zicade-rs/compare/v0.1.0...v0.2.0) (2026-07-22)
 
 
