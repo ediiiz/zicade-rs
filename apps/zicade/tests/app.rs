@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
@@ -92,6 +93,50 @@ async fn starts_and_shuts_down_gracefully() {
         .expect("run must return within timeout (no hang)")
         .expect("run task must not panic");
     assert!(joined.is_ok(), "run returned an error: {joined:?}");
+}
+
+#[tokio::test]
+async fn shuts_down_even_with_an_open_sse_stream() {
+    // Regression: a browser tab holding an `/events/metrics` SSE connection open
+    // used to stall axum's graceful shutdown forever, so the tray "Close" left a
+    // zombie process. The shutdown signal now ends the SSE stream, so `run`
+    // returns even while a client is still connected.
+    let (_layer, logs) = channel_layer(64);
+    let port = free_port_pair().await;
+    let app = App::start(direct_config(port), temp_config_path(), logs)
+        .await
+        .expect("app should start in direct mode");
+    let web_addr = app.web_addr();
+
+    let (tx, rx) = oneshot::channel::<()>();
+    let handle = tokio::spawn(app.run(async move {
+        let _ = rx.await;
+    }));
+
+    // Open a long-lived SSE connection (as a browser EventSource would) and read
+    // the first streamed bytes, so it is registered as an in-flight connection.
+    let mut sse = TcpStream::connect(web_addr).await.expect("connect web");
+    sse.write_all(
+        b"GET /events/metrics HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n",
+    )
+    .await
+    .expect("write SSE request");
+    let mut buf = [0u8; 256];
+    let n = tokio::time::timeout(Duration::from_secs(3), sse.read(&mut buf))
+        .await
+        .expect("first SSE bytes within 3s")
+        .expect("read the SSE response");
+    assert!(n > 0, "SSE stream should send its initial response bytes");
+
+    // Trigger shutdown while the SSE connection is still open.
+    tx.send(()).expect("send shutdown");
+    let joined = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("run must return even with an open SSE stream (no zombie)")
+        .expect("run task must not panic");
+    assert!(joined.is_ok(), "run returned an error: {joined:?}");
+
+    drop(sse);
 }
 
 #[tokio::test]

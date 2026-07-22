@@ -19,12 +19,17 @@ pub(crate) async fn sse_logs(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let rx = state.logs().subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(|item| match item {
+    let events = BroadcastStream::new(rx).filter_map(|item| match item {
         Ok(event) => serde_json::to_string(&event)
             .ok()
             .map(|json| Ok(Event::default().data(json))),
         Err(_lagged) => None,
     });
+    // `take_until` is a `futures_util` combinator (not in tokio_stream's
+    // `StreamExt`), so call it via the trait path to avoid clashing with the
+    // tokio_stream `filter_map`/`map` used above. It ends the stream when the
+    // app shuts down, so the SSE response closes and graceful shutdown finishes.
+    let stream = futures_util::StreamExt::take_until(events, state.shutdown_signal());
     Sse::new(stream)
 }
 
@@ -35,9 +40,13 @@ pub(crate) async fn sse_logs(
 pub(crate) async fn sse_metrics(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = IntervalStream::new(interval(Duration::from_secs(1))).map(move |_| {
+    let shutdown = state.shutdown_signal();
+    let ticks = IntervalStream::new(interval(Duration::from_secs(1))).map(move |_| {
         let json = serde_json::to_string(&state.status_snapshot()).unwrap_or_default();
         Ok(Event::default().data(json))
     });
+    // See `sse_logs`: `take_until` comes from `futures_util`, called via the
+    // trait path to coexist with tokio_stream's `map` above.
+    let stream = futures_util::StreamExt::take_until(ticks, shutdown);
     Sse::new(stream)
 }
