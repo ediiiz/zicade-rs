@@ -53,7 +53,9 @@ Name: "startonlogin"; Description: "Start Zicade when I sign in (runs in the not
 Name: "runasservice"; Description: "Run Zicade as a Windows service (all users, starts at boot)"; Flags: unchecked; Check: IsAdminInstallMode
 
 [Files]
-Source: "{#ExeSource}"; DestDir: "{app}"; Flags: ignoreversion
+; DestName renames the release artifact (e.g. zicade-<tag>-...-msvc.exe) to the
+; plain zicade.exe that every shortcut/registry/service reference expects.
+Source: "{#ExeSource}"; DestDir: "{app}"; DestName: "{#MyAppExe}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Zicade"; Filename: "{app}\{#MyAppExe}"; Comment: "Local forwarding HTTP/HTTPS proxy"
