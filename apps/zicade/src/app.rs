@@ -54,10 +54,12 @@ pub struct App {
     /// ends the long-lived SSE responses so axum's graceful shutdown completes
     /// instead of waiting forever on an open browser tab.
     shutdown_tx: watch::Sender<bool>,
-    /// The corporate-network gate, when enabled. Its monitor thread is spawned in
+    /// The corporate-network gate. Always present so the corp-network toggle can
+    /// be switched on (or off) live via the UI without a restart; while disabled
+    /// it is dormant (its `evaluate` is a no-op). Its monitor thread is spawned in
     /// [`App::run`] (so it observes the same shutdown signal) and gates live
     /// routing between the configured mode (on-corp) and `Direct` (off-corp).
-    gate: Option<crate::netmon::NetworkGate>,
+    gate: crate::netmon::NetworkGate,
 }
 
 impl App {
@@ -68,6 +70,7 @@ impl App {
         config: Config,
         config_path: PathBuf,
         logs: LogStore,
+        log_reload: crate::LogReload,
     ) -> anyhow::Result<Self> {
         config
             .validate(&ValidationCtx::host())
@@ -96,14 +99,15 @@ impl App {
         let proxy_addr = proxy.local_addr();
 
         // A live handle to the proxy's routing, captured before `proxy` is moved
-        // into `Self`. Either the apply hook (ungated) or the gate (gated) swaps
-        // routing here, so changes take effect without a restart.
+        // into `Self`. The gate swaps routing through this handle (on network or
+        // config changes), so edits take effect without a restart.
         let routing_handle = proxy.routing_handle();
-        // Shared on-corp state (gate → web status), present only when gated.
-        let on_corp_cell: Option<zicade_web::OnCorpCell> =
-            gate_enabled.then(|| std::sync::Arc::new(std::sync::Mutex::new(None)));
+        // Shared on-corp state (gate → web status). Always allocated: the gate is
+        // always present, and it writes `None` here while disabled so the status
+        // omits `onCorp` until the gate is actually gating.
+        let on_corp_cell: zicade_web::OnCorpCell = std::sync::Arc::new(std::sync::Mutex::new(None));
         let (hook, gate) =
-            build_apply_hook_and_gate(&config, &routing_handle, on_corp_cell.clone());
+            build_apply_hook_and_gate(&config, &routing_handle, on_corp_cell.clone(), log_reload);
 
         // The web server sits on the proxy port + 1 (both loopback).
         let web_port = proxy_addr
@@ -127,10 +131,7 @@ impl App {
         let state = state.with_metrics_source(std::sync::Arc::new(ProxyMetricsSource(metrics)));
         let state = state.with_apply_hook(hook);
         let state = state.with_shutdown(shutdown_rx);
-        let state = match on_corp_cell {
-            Some(cell) => state.with_on_corp(cell),
-            None => state,
-        };
+        let state = state.with_on_corp(on_corp_cell);
         state.set_status(StatusSnapshot {
             routing_mode: routing_mode.to_owned(),
             listen_addr: proxy_addr.to_string(),
@@ -172,10 +173,10 @@ impl App {
         } = self;
 
         // Start the corp-network gate's monitor thread now, sharing the same
-        // shutdown signal so it winds down with everything else.
-        if let Some(gate) = gate {
-            gate.spawn(tx.subscribe());
-        }
+        // shutdown signal so it winds down with everything else. While the gate
+        // is disabled the thread just polls and does nothing, so it is always
+        // spawned — enabling the gate live via the UI then takes effect.
+        gate.spawn(tx.subscribe());
 
         let proxy_tx = tx.clone();
         let proxy_fut = {
@@ -225,58 +226,58 @@ fn routing_mode_label(mode: RoutingMode) -> &'static str {
     }
 }
 
-/// Build the config-apply hook and, when the corp-network gate is enabled, the
-/// gate itself.
+/// Build the (always-present) corp-network gate and the config-apply hook that
+/// drives it.
 ///
-/// - **Gated:** the gate owns live routing; its initial routing is applied
-///   synchronously (before serving) and the apply hook reconfigures the gate.
-/// - **Ungated:** the apply hook rebuilds routing and swaps it directly (the
-///   pre-existing live-apply behavior).
+/// The gate owns the proxy's live routing whether or not corp-network detection
+/// is currently enabled:
+/// - **Enabled:** the gate swaps between the configured routing (on-corp) and
+///   `Direct` (off-corp); its initial decision is applied synchronously here
+///   (before serving) via [`NetworkGate::evaluate_now`].
+/// - **Disabled:** the gate is dormant (`evaluate` is a no-op). Its
+///   [`NetworkGate::reconfigure`] applies the plain configured routing, which is
+///   how a live routing edit takes effect — matching the old ungated behavior.
+///
+/// Because the gate is always built, toggling corp-network detection on/off in
+/// the UI takes effect live: the apply hook always calls `reconfigure`, which
+/// enables or disables gating as the new config dictates. The hook also
+/// live-applies the log level (via `log_reload`) before reconfiguring.
 fn build_apply_hook_and_gate(
     config: &Config,
     routing_handle: &zicade_proxy::RoutingHandle,
-    on_corp_cell: Option<zicade_web::OnCorpCell>,
-) -> (
-    zicade_web::ConfigApplyHook,
-    Option<crate::netmon::NetworkGate>,
-) {
-    if let Some(cell) = on_corp_cell {
-        let gate = crate::netmon::NetworkGate::new(
-            routing_handle.clone(),
-            config.clone(),
-            Box::new(|cfg: &Config| match build_routing(cfg) {
-                Ok(routing) => routing,
-                Err(err) => {
-                    tracing::error!(
-                        error = %format!("{err:#}"),
-                        "corp-network gate: routing rebuild failed; using Direct"
-                    );
-                    zicade_proxy::Routing::Direct
-                }
-            }),
-            Box::new(zicade_win::active_dns_suffixes),
-            Box::new(move |corp: bool| {
-                if let Ok(mut c) = cell.lock() {
-                    *c = Some(corp);
-                }
-            }),
-        );
-        // Set the correct initial routing before the proxy begins serving.
-        gate.evaluate_now();
-        let hook_gate = gate.clone();
-        let hook: zicade_web::ConfigApplyHook =
-            std::sync::Arc::new(move |cfg: &Config| hook_gate.reconfigure(cfg.clone()));
-        (hook, Some(gate))
-    } else {
-        let apply_handle = routing_handle.clone();
-        let hook: zicade_web::ConfigApplyHook =
-            std::sync::Arc::new(move |cfg: &Config| match build_routing(cfg) {
-                Ok(routing) => apply_handle.set(routing),
-                Err(err) => tracing::error!(
+    on_corp_cell: zicade_web::OnCorpCell,
+    log_reload: crate::LogReload,
+) -> (zicade_web::ConfigApplyHook, crate::netmon::NetworkGate) {
+    let gate = crate::netmon::NetworkGate::new(
+        routing_handle.clone(),
+        config.clone(),
+        Box::new(|cfg: &Config| match build_routing(cfg) {
+            Ok(routing) => routing,
+            Err(err) => {
+                tracing::error!(
                     error = %format!("{err:#}"),
-                    "failed to rebuild routing on live config apply"
-                ),
-            });
-        (hook, None)
-    }
+                    "corp-network gate: routing rebuild failed; using Direct"
+                );
+                zicade_proxy::Routing::Direct
+            }
+        }),
+        Box::new(zicade_win::active_dns_suffixes),
+        Box::new(move |state: Option<bool>| {
+            if let Ok(mut c) = on_corp_cell.lock() {
+                *c = state;
+            }
+        }),
+    );
+    // Set the correct initial routing before the proxy begins serving. A no-op
+    // while the gate is disabled; the caller applies the plain configured routing
+    // (failing fast on a build error) in that case.
+    gate.evaluate_now();
+    let hook_gate = gate.clone();
+    let hook: zicade_web::ConfigApplyHook = std::sync::Arc::new(move |cfg: &Config| {
+        // Apply the log level first so the reconfigure it triggers is captured at
+        // the newly-selected verbosity.
+        (log_reload)(&cfg.logging.level);
+        hook_gate.reconfigure(cfg.clone());
+    });
+    (hook, gate)
 }

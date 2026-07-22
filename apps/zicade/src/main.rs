@@ -167,9 +167,9 @@ async fn serve(
     let config = load_or_create_config(&config_path)?;
 
     let (observe_layer, logs) = channel_layer(LOG_BUFFER_CAP);
-    init_tracing(&config.logging, observe_layer);
+    let log_reload = init_tracing(&config.logging, observe_layer);
 
-    zicade::run(config, config_path, logs, shutdown).await
+    zicade::run(config, config_path, logs, log_reload, shutdown).await
 }
 
 /// Turn a serve result into a process exit code, printing any error.
