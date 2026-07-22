@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/ediiiz/zicade-rs/compare/v0.2.1...v0.3.0) (2026-07-22)
+
+
+### Features
+
+* **installer:** switch from WiX/MSI to an Inno Setup installer ([93a8603](https://github.com/ediiiz/zicade-rs/commit/93a8603c6745ecbc13e790c79fb96cece18b8058))
+
 ## [0.2.1](https://github.com/ediiiz/zicade-rs/compare/v0.2.0...v0.2.1) (2026-07-22)
 
 
