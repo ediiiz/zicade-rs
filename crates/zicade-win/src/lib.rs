@@ -11,11 +11,13 @@
 
 use std::fmt;
 
+mod netmon;
 pub mod service;
 mod sspi;
 pub mod tray;
 mod winhttp;
 
+pub use netmon::{active_dns_suffixes, wait_for_network_change};
 pub use service::ServiceStop;
 pub use sspi::{LoopbackReport, SspiNegotiate, SspiPackage, run_loopback_handshake};
 pub use winhttp::WinHttpPacBackend;
