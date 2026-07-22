@@ -24,6 +24,14 @@
       [hidden] { display: none !important; }
       .brand { display: inline-flex; align-items: center; gap: 0.5rem; }
       .brand img { width: 1.6rem; height: 1.6rem; display: block; }
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: 0.6rem; }
+      .stat { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); padding: 0.5rem 0.7rem; }
+      .stat-label { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: .04em; color: var(--pico-muted-color); }
+      .stat-value { display: block; font-size: 1.3rem; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+      #st-failed.bad { color: var(--pico-del-color); }
+      .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; margin-left: .4rem; vertical-align: middle; background: var(--pico-muted-color); }
+      .dot.ok { background: var(--pico-ins-color); }
+      .dot.down { background: var(--pico-del-color); }
     </style>
   </head>
   <body>
@@ -192,8 +200,17 @@
       </article>
 
       <article>
-        <header><strong>Status</strong></header>
-        <pre id="status">(loading…)</pre>
+        <header>
+          <strong>Status</strong><span id="status-dot" class="dot" title="connecting…"></span>
+        </header>
+        <div class="stats">
+          <div class="stat"><span class="stat-label">Routing</span><span class="stat-value" id="st-mode">—</span></div>
+          <div class="stat"><span class="stat-label">Listen</span><span class="stat-value" id="st-listen">—</span></div>
+          <div class="stat"><span class="stat-label">Requests</span><span class="stat-value" id="st-total">—</span></div>
+          <div class="stat"><span class="stat-label">Failed</span><span class="stat-value" id="st-failed">—</span></div>
+          <div class="stat"><span class="stat-label">Active conns</span><span class="stat-value" id="st-active">—</span></div>
+        </div>
+        <small class="muted" id="st-updated"></small>
       </article>
 
       <article>
@@ -324,11 +341,25 @@
         }
       }
 
+      const fmtInt = (n) => (typeof n === "number" ? n : 0).toLocaleString();
+      function setOnline(ok) {
+        const d = $("#status-dot");
+        d.className = "dot " + (ok ? "ok" : "down");
+        d.title = ok ? "proxy reachable" : "status unreachable";
+      }
       async function loadStatus() {
         try {
-          const r = await fetch("/api/status");
-          $("#status").textContent = JSON.stringify(await r.json(), null, 2);
-        } catch (e) { $("#status").textContent = "(status unavailable)"; }
+          const s = await (await fetch("/api/status")).json();
+          $("#st-mode").textContent = s.routing_mode || "—";
+          $("#st-listen").textContent = s.listen_addr || "—";
+          $("#st-total").textContent = fmtInt(s.requests_total);
+          const f = $("#st-failed");
+          f.textContent = fmtInt(s.requests_failed);
+          f.classList.toggle("bad", (s.requests_failed || 0) > 0);
+          $("#st-active").textContent = fmtInt(s.active_connections);
+          $("#st-updated").textContent = "updated " + new Date().toLocaleTimeString();
+          setOnline(true);
+        } catch (e) { setOnline(false); }
       }
 
       function startLogs() {
@@ -354,6 +385,8 @@
       $("#config-form").addEventListener("submit", saveConfig);
       loadConfig();
       startLogs();
+      // Poll status so counters and active connections update live.
+      setInterval(loadStatus, 2000);
     </script>
   </body>
 </html>

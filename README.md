@@ -185,6 +185,11 @@ requires a username, and `negotiate` auth is only accepted on Windows.
   shown inline.
 - **Read-only** endpoints (`GET /api/config`, `GET /api/status`,
   `GET /events/logs` SSE) are open on loopback.
+- A **live status panel** shows the active routing mode, listen address, total
+  and failed request counts, and active connections, polling `GET /api/status`
+  every couple of seconds (with a reachable/unreachable indicator). Routing/auth
+  edits saved from the form apply to the running proxy without a restart; a
+  listen host/port change still needs a restart.
 
 ### Web-UI auth (`web.authRequired`, default **off**)
 
