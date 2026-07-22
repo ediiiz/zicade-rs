@@ -1,9 +1,11 @@
 //! Shared, cloneable application state for the axum handlers.
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use zicade_config::{Config, RoutingMode};
 use zicade_observe::LogStore;
 
@@ -63,6 +65,11 @@ pub struct AppState {
     status: Arc<Mutex<StatusSnapshot>>,
     metrics: Option<Arc<dyn MetricsSource>>,
     apply_hook: Option<ConfigApplyHook>,
+    /// Fires (flips to `true`) when the app is shutting down, so long-lived SSE
+    /// streams can end and let axum's graceful shutdown complete. `None` (the
+    /// default) means "never shut down" — the streams stay open indefinitely,
+    /// which is what the in-memory oneshot tests want.
+    shutdown: Option<watch::Receiver<bool>>,
 }
 
 impl AppState {
@@ -77,6 +84,7 @@ impl AppState {
             status: Arc::new(Mutex::new(StatusSnapshot::default())),
             metrics: None,
             apply_hook: None,
+            shutdown: None,
         }
     }
 
@@ -93,6 +101,15 @@ impl AppState {
     #[must_use]
     pub fn with_apply_hook(mut self, hook: ConfigApplyHook) -> Self {
         self.apply_hook = Some(hook);
+        self
+    }
+
+    /// Attach the app's shutdown signal so the SSE streams end when it fires
+    /// (see [`AppState::shutdown_signal`]). Without it, the streams never
+    /// self-terminate and an open browser tab would stall graceful shutdown.
+    #[must_use]
+    pub fn with_shutdown(mut self, rx: watch::Receiver<bool>) -> Self {
+        self.shutdown = Some(rx);
         self
     }
 
@@ -131,6 +148,22 @@ impl AppState {
     /// The log store feeding the SSE stream.
     pub(crate) fn logs(&self) -> &LogStore {
         &self.logs
+    }
+
+    /// A future that resolves once the app signals shutdown. If no shutdown
+    /// signal is attached, it never resolves (`pending`), so the SSE streams
+    /// stay open exactly as they did before — the behavior the oneshot tests
+    /// rely on. Used with `StreamExt::take_until` to close the SSE streams.
+    pub(crate) fn shutdown_signal(&self) -> impl Future<Output = ()> + Send + 'static + use<> {
+        let rx = self.shutdown.clone();
+        async move {
+            match rx {
+                Some(mut rx) => {
+                    let _ = rx.wait_for(|flag| *flag).await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        }
     }
 
     /// A snapshot clone of the current in-memory config.

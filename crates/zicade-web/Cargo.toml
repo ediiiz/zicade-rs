@@ -12,6 +12,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+futures-util = { workspace = true }
 axum = { workspace = true }
 rust-embed = { workspace = true }
 rand = { workspace = true }

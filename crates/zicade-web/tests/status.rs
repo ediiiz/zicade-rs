@@ -168,3 +168,60 @@ async fn metrics_sse_streams_a_snapshot() {
         "first SSE frame should be a StatusSnapshot JSON, got: {text}"
     );
 }
+
+#[tokio::test]
+async fn metrics_sse_ends_when_shutdown_fires() {
+    // A long-lived SSE stream must end when the app signals shutdown; otherwise
+    // it keeps the connection open and stalls axum's graceful shutdown (the tray
+    // "Close" then leaves a zombie process behind).
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let state = state_with_config(Config::default())
+        .with_metrics_source(std::sync::Arc::new(FakeMetrics))
+        .with_shutdown(rx);
+    let app = router(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/events/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let mut body = resp.into_body();
+    // The immediate first tick proves the stream is live before we shut it down.
+    tokio::time::timeout(Duration::from_secs(3), body.frame())
+        .await
+        .expect("a frame within 3s")
+        .expect("stream should yield a frame")
+        .expect("frame should be Ok");
+
+    // Signal shutdown; the stream must terminate promptly (a bounded number of
+    // trailing frames, then end). Without the fix it emits a frame every second
+    // forever, so `ended` stays false and this assertion fails.
+    tx.send(true).unwrap();
+    let mut ended = false;
+    for _ in 0..5 {
+        match tokio::time::timeout(Duration::from_secs(3), body.frame())
+            .await
+            .expect("stream must not hang after shutdown")
+        {
+            None => {
+                ended = true;
+                break;
+            }
+            Some(Ok(_)) => continue,
+            Some(Err(_)) => {
+                ended = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        ended,
+        "metrics SSE stream must end after shutdown is signaled"
+    );
+}

@@ -49,6 +49,11 @@ pub struct App {
     web_listener: TcpListener,
     web_addr: SocketAddr,
     router: Router,
+    /// Fans the shutdown signal out to the proxy, the web server, and the web
+    /// crate's SSE streams (via the receiver handed to `AppState`). Firing it
+    /// ends the long-lived SSE responses so axum's graceful shutdown completes
+    /// instead of waiting forever on an open browser tab.
+    shutdown_tx: watch::Sender<bool>,
 }
 
 impl App {
@@ -110,9 +115,15 @@ impl App {
         // Capture the live metrics handle before `proxy` is moved into `Self`.
         let metrics = proxy.metrics();
 
+        // One shutdown channel drives everything: `run`'s driver flips it, the
+        // proxy and web servers watch it, and the web layer's SSE streams end on
+        // it (the receiver handed to `AppState`).
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
         let state = AppState::new(config, config_path, token, logs);
         let state = state.with_metrics_source(std::sync::Arc::new(ProxyMetricsSource(metrics)));
         let state = state.with_apply_hook(hook);
+        let state = state.with_shutdown(shutdown_rx);
         state.set_status(StatusSnapshot {
             routing_mode: routing_mode.to_owned(),
             listen_addr: proxy_addr.to_string(),
@@ -125,6 +136,7 @@ impl App {
             web_listener,
             web_addr,
             router: router(state),
+            shutdown_tx,
         })
     }
 
@@ -142,11 +154,11 @@ impl App {
     /// signal out to both. If either server exits on its own first, the other
     /// is signaled too so `run` never hangs; the first error is surfaced.
     pub async fn run(self, shutdown: impl Future<Output = ()> + Send) -> anyhow::Result<()> {
-        let (tx, _rx) = watch::channel(false);
         let Self {
             proxy,
             web_listener,
             router,
+            shutdown_tx: tx,
             ..
         } = self;
 
