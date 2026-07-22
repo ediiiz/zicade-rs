@@ -59,6 +59,63 @@ embedded either way — see [System-tray mode](#system-tray-mode-double-click).
 
 [release-please]: https://github.com/googleapis/release-please
 
+## Installing (MSI)
+
+Every release also ships a Windows Installer package
+(`zicade-<tag>-x86_64.msi`) attached to the GitHub Release, alongside the raw
+`.exe`. It targets Windows 10/11 (x64) and is built in CI with the
+[WiX Toolset] v3.
+
+Double-click the MSI, or install from a shell:
+
+```sh
+msiexec /i zicade-<tag>-x86_64.msi          # interactive
+```
+
+### Install scope
+
+The installer lets you choose the scope on its **"Advanced"** path:
+
+- **Install for all users** — installs to `Program Files\Zicade`. **Requires
+  administrator rights** (a UAC prompt); needed if you want the Windows-service
+  option below.
+- **Install just for me** — installs under `%LOCALAPPDATA%`, no admin required.
+
+### Startup options
+
+A **Startup options** page (and matching command-line properties) offers two
+independent, off-by-default ways to have Zicade start automatically:
+
+- **Start on sign-in** (`STARTONLOGIN=1`) — adds a per-scope `Run`-key entry so
+  Zicade launches at login. Because it starts with no subcommand, it runs in
+  [system-tray mode](#system-tray-mode-double-click) (a console window may flash
+  briefly before it self-hides).
+- **Run as a Windows service** (`RUNASSERVICE=1`) — registers the auto-start
+  [Windows service](#run-as-a-windows-service). This reuses `zicade service
+  install`, so it needs an **all-users (administrator)** install; it is ignored
+  for a per-user install.
+
+Silent / enterprise install (e.g. via GPO or Intune):
+
+```sh
+# All users, auto-start service, no UI:
+msiexec /i zicade-<tag>-x86_64.msi /qn ALLUSERS=1 RUNASSERVICE=1
+
+# Per-user, start in the tray on sign-in:
+msiexec /i zicade-<tag>-x86_64.msi /qn STARTONLOGIN=1
+
+# Uninstall (removes the exe, shortcut, Run-key entry, and the service):
+msiexec /x zicade-<tag>-x86_64.msi /qn
+```
+
+Developers can build the MSI locally with [`cargo wix`] (`cargo install
+cargo-wix`, then `cargo wix -p zicade`); CI instead drives `candle`/`light`
+directly against the MSVC-built exe (see the source at
+[`apps/zicade/wix/main.wxs`](apps/zicade/wix/main.wxs)).
+
+[WiX Toolset]: https://wixtoolset.org
+[`cargo wix`]: https://github.com/volks73/cargo-wix
+
 ## Running
 
 ```sh

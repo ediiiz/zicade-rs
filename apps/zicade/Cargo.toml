@@ -39,3 +39,13 @@ workspace = true
 
 [build-dependencies]
 embed-resource = "3.0.11"
+
+# `cargo wix` convenience for local MSI builds. CI drives candle/light directly
+# (see .github/workflows/release-please.yml); this just lets developers run
+# `cargo wix -p zicade` against the hand-authored source. The UpgradeCode must
+# match the one in wix/main.wxs.
+[package.metadata.wix]
+name = "zicade"
+upgrade-guid = "E7B9A6C2-3D4F-4A1B-9C8E-1F2A3B4C5D6E"
+path-guid = "F1C2D3E4-5A6B-4C7D-8E9F-0A1B2C3D4E5F"
+eula = "wix/License.rtf"
