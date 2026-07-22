@@ -24,10 +24,41 @@ jobs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: googleapis/release-please-action@v4
         id: rp
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      # release-please's "simple" release type bumps the version in Cargo.toml
+      # but never touches Cargo.lock, so the committed lock drifts. Reconcile it
+      # on the open release PR (labelled `autorelease: pending`) with
+      # `cargo update --workspace` — the command Cargo documents for syncing the
+      # lock after a version change; it only rewrites the workspace crates'
+      # entries, leaving external deps pinned. Runs on ubuntu (cargo preinstalled)
+      # and only writes Cargo.lock, so the pinned windows-gnu target in
+      # .cargo/config.toml is irrelevant (no compile/link happens).
+      - name: Sync Cargo.lock on the release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          NUM=$(gh pr list --state open --label "autorelease: pending" --json number --jq '.[0].number // empty')
+          if [ -z "$NUM" ]; then
+            echo "No open release PR; nothing to sync."
+            exit 0
+          fi
+          gh pr checkout "$NUM"
+          cargo update --workspace
+          if git diff --quiet -- Cargo.lock; then
+            echo "Cargo.lock already in sync."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore: sync Cargo.lock with release version" -- Cargo.lock
+            git push
+          fi
 
   build-windows-exe:
     needs: release-please
