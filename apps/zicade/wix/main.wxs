@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  Zicade Windows Installer (MSI) definition — WiX Toolset v3.
+
+  Built in CI by candle/light against the MSVC-built zicade.exe (see the
+  release-please workflow). Two preprocessor defines drive the build:
+
+      -dVersion=<x.y.z>       product version (defaults to the value below)
+      -dExeSource=<abs path>  the zicade.exe to package (default: local target)
+
+  Sibling assets (the icon, the license) are referenced via
+  $(sys.SOURCEFILEDIR) so the source is location-independent (works both from
+  repo root in CI and from `cargo wix` in the crate directory).
+
+  UI: WixUI_Advanced gives the per-user / per-machine scope choice (with the
+  admin/UAC note). A custom StartupOptionsDlg is inserted before the final
+  "ready" page to offer the two optional startup mechanisms; both are also
+  public properties so silent installs can set them on the command line:
+
+      STARTONLOGIN=1   add a per-scope Run-key entry that launches Zicade in
+                       tray mode at login.
+      RUNASSERVICE=1   register the auto-start Windows service (per-machine /
+                       elevated installs only; reuses `zicade service install`).
+-->
+
+<?ifndef Version ?>
+<?define Version = "0.1.0" ?>
+<?endif ?>
+
+<?ifndef ExeSource ?>
+<?define ExeSource = "$(sys.SOURCEFILEDIR)..\..\..\target\x86_64-pc-windows-msvc\release\zicade.exe" ?>
+<?endif ?>
+
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Zicade"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="Zicade"
+           UpgradeCode="E7B9A6C2-3D4F-4A1B-9C8E-1F2A3B4C5D6E">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             Description="Zicade — local forwarding HTTP/HTTPS proxy for Windows" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Startup options: public + secure so they cross the UI/execute boundary
+         and can be set on the msiexec command line. Default off. -->
+    <Property Id="STARTONLOGIN" Value="0" Secure="yes" />
+    <Property Id="RUNASSERVICE" Value="0" Secure="yes" />
+
+    <!-- Product icon shown in Add/Remove Programs (from the app's .ico). -->
+    <Icon Id="ZicadeIcon.ico" SourceFile="$(sys.SOURCEFILEDIR)..\assets\zicade.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ZicadeIcon.ico" />
+
+    <!-- ============================ Layout ============================ -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <!-- WixUI_Advanced relocates APPLICATIONFOLDER to a per-user path
+             (LocalAppData) when "just for me" is chosen; this is the default
+             per-machine location. -->
+        <Directory Id="APPLICATIONFOLDER" Name="Zicade" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ZicadeMenuFolder" Name="Zicade" />
+      </Directory>
+    </Directory>
+
+    <!-- ========================== Components ========================== -->
+    <DirectoryRef Id="APPLICATIONFOLDER">
+      <Component Id="MainExecutable" Guid="*">
+        <File Id="zicadeExe"
+              Name="zicade.exe"
+              Source="$(var.ExeSource)"
+              KeyPath="yes" />
+      </Component>
+
+      <!-- Start on login: a Run-key value pointing at the bare exe. Launched
+           this way, Zicade's console-detection heuristic starts it in tray
+           mode. HKMU maps to HKLM (all users) or HKCU (per-user) by scope.
+           Installed only when STARTONLOGIN is set. -->
+      <Component Id="StartOnLogin" Guid="*">
+        <Condition>STARTONLOGIN = "1"</Condition>
+        <RegistryValue Root="HKMU"
+                       Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                       Name="Zicade"
+                       Type="string"
+                       Value="&quot;[#zicadeExe]&quot;"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="ZicadeMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="ZicadeShortcut"
+                  Name="Zicade"
+                  Description="Local forwarding HTTP/HTTPS proxy"
+                  Target="[#zicadeExe]"
+                  WorkingDirectory="APPLICATIONFOLDER"
+                  Icon="ZicadeIcon.ico" />
+        <RemoveFolder Id="RemoveZicadeMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKMU"
+                       Key="Software\Zicade"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="MainFeature" Title="Zicade" Level="1" Display="expand" ConfigurableDirectory="APPLICATIONFOLDER">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="StartOnLogin" />
+    </Feature>
+
+    <!-- ===================== Service (optional) ======================
+         Reuse the app's own SCM logic rather than the MSI service table, so
+         the service is cleanly optional (a component in an always-installed
+         feature can't be conditionally skipped for a service). Deferred +
+         Impersonate=no runs as LocalSystem during an elevated per-machine
+         install. Return=ignore keeps a no-op (e.g. service absent on
+         uninstall, or a non-elevated install) from failing the transaction. -->
+    <CustomAction Id="InstallSvc"
+                  FileKey="zicadeExe"
+                  ExeCommand="service install"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <CustomAction Id="UninstallSvc"
+                  FileKey="zicadeExe"
+                  ExeCommand="service uninstall"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- After the exe is on disk; only when requested, on a fresh elevated
+           per-machine install. -->
+      <Custom Action="InstallSvc" After="InstallFiles">RUNASSERVICE = "1" AND ALLUSERS = "1" AND NOT Installed</Custom>
+      <!-- Remove the service while the exe still exists (before RemoveFiles). -->
+      <Custom Action="UninstallSvc" Before="RemoveFiles">REMOVE = "ALL"</Custom>
+    </InstallExecuteSequence>
+
+    <!-- ============================== UI ============================== -->
+    <!-- Scope selection + license. -->
+    <Property Id="ApplicationFolderName" Value="Zicade" />
+    <Property Id="WixAppFolder" Value="WixPerMachineFolder" />
+    <WixVariable Id="WixUISupportPerMachine" Value="1" />
+    <WixVariable Id="WixUISupportPerUser" Value="1" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
+
+    <UI>
+      <UIRef Id="WixUI_Advanced" />
+
+      <!-- Custom page offering the two startup mechanisms. -->
+      <Dialog Id="StartupOptionsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="300" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Startup options" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="340" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose how Zicade starts automatically. Both are optional." />
+
+        <Control Id="StartOnLoginCheckBox" Type="CheckBox" X="20" Y="60" Width="335" Height="18" Property="STARTONLOGIN" CheckBoxValue="1" Text="Start Zicade when I sign in (runs in the notification-area tray)" />
+        <Control Id="StartOnLoginNote" Type="Text" X="34" Y="80" Width="320" Height="24" Transparent="yes" NoPrefix="yes" Text="Adds a login entry that launches Zicade minimized to the system tray." />
+
+        <Control Id="RunAsServiceCheckBox" Type="CheckBox" X="20" Y="114" Width="335" Height="18" Property="RUNASSERVICE" CheckBoxValue="1" Text="Run Zicade as a Windows service (starts at boot, before sign-in)" />
+        <Control Id="RunAsServiceNote" Type="Text" X="34" Y="134" Width="320" Height="30" Transparent="yes" NoPrefix="yes" Text="Requires an &quot;all users&quot; (administrator) install. This option is ignored for a &quot;just for me&quot; install." />
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="InstallDirDlg">WixUI_InstallMode = "InstallCustom"</Publish>
+          <Publish Event="NewDialog" Value="AdvancedWelcomeEulaDlg">WixUI_InstallMode &lt;&gt; "InstallCustom"</Publish>
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- Route both the typical ("Install") and advanced ("Advanced") paths
+           through StartupOptionsDlg, then on to the ready page. Higher Order
+           supersedes the built-in WixUI_Advanced publishes. -->
+      <Publish Dialog="AdvancedWelcomeEulaDlg" Control="Install" Event="NewDialog" Value="StartupOptionsDlg" Order="10">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="StartupOptionsDlg" Order="10">1</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="StartupOptionsDlg" Order="10">1</Publish>
+    </UI>
+  </Product>
+</Wix>
