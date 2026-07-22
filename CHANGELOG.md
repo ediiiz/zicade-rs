@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/ediiiz/zicade-rs/compare/v0.3.1...v0.3.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **netmon:** always build the corp-network gate; add live log-level r… ([6c63c14](https://github.com/ediiiz/zicade-rs/commit/6c63c14ba90146426f19933cecd08a562650519c))
+* **netmon:** always build the corp-network gate; add live log-level reload ([d57805d](https://github.com/ediiiz/zicade-rs/commit/d57805d1307726c54756eeb0a645276299666142))
+
 ## [0.3.1](https://github.com/ediiiz/zicade-rs/compare/v0.3.0...v0.3.1) (2026-07-22)
 
 
