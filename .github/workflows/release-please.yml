@@ -6,8 +6,8 @@ name: release-please
 #      edits .release-please-manifest.json and, via the `x-release-please-version`
 #      annotation, the workspace version in Cargo.toml, and updates CHANGELOG.md.
 #   2. When that PR is merged, release-please tags the commit and creates the
-#      GitHub Release; the build job then compiles the Windows release .exe and
-#      attaches it to that release.
+#      GitHub Release; the build job then compiles the Windows release .exe,
+#      packages an Inno Setup installer, and attaches both to that release.
 
 on:
   push:
@@ -56,32 +56,27 @@ jobs:
           mkdir -p dist
           cp "target/x86_64-pc-windows-msvc/release/zicade.exe" \
              "dist/zicade-${{ needs.release-please.outputs.tag_name }}-x86_64-pc-windows-msvc.exe"
-      # Package the staged exe into an MSI. WiX v3 (candle/light) is driven
-      # directly against the built binary — no cargo-wix, so the repo's pinned
-      # GNU .cargo/config.toml never enters the picture. Chocolatey is
-      # preinstalled on windows-latest.
-      - name: Install WiX Toolset v3
+      # Package the staged exe into a setup installer with Inno Setup 6.
+      # Chocolatey is preinstalled on windows-latest.
+      - name: Install Inno Setup
         shell: pwsh
-        run: choco install wixtoolset -y --no-progress
-      - name: Build MSI installer
+        run: choco install innosetup -y --no-progress
+      - name: Build installer (Inno Setup)
         shell: bash
         run: |
           set -e
           TAG="${{ needs.release-please.outputs.tag_name }}"
           VERSION="${TAG#v}"
           EXE="$PWD/dist/zicade-${TAG}-x86_64-pc-windows-msvc.exe"
-          # Locate the WiX v3 bin (candle/light); the folder is versioned.
-          CANDLE=$(find "/c/Program Files (x86)" -name candle.exe -path "*WiX Toolset*" | head -1)
-          WIX_BIN=$(dirname "$CANDLE")
-          echo "Using WiX at: $WIX_BIN"
-          mkdir -p build
-          "$WIX_BIN/candle.exe" -arch x64 -ext WixUIExtension \
-            -dVersion="$VERSION" -dExeSource="$(cygpath -w "$EXE")" \
-            apps/zicade/wix/main.wxs -o build/main.wixobj
-          "$WIX_BIN/light.exe" -ext WixUIExtension \
-            build/main.wixobj -o "dist/zicade-${TAG}-x86_64.msi"
-      - name: Attach binary + MSI to the GitHub Release
+          # Locate ISCC.exe; the install folder is not on PATH by default.
+          ISCC=$(find "/c/Program Files (x86)" -name ISCC.exe -path "*Inno Setup*" | head -1)
+          echo "Using ISCC at: $ISCC"
+          # Double slashes stop MSYS from mangling the /D and /O switches.
+          "$ISCC" //DMyAppVersion="$VERSION" //DExeSource="$(cygpath -w "$EXE")" \
+            //O"$(cygpath -w "$PWD/dist")" installer/zicade.iss
+      - name: Attach binary + installer to the GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" dist/*.exe dist/*.msi --clobber
+        # dist/*.exe covers both the raw zicade.exe and the *-setup.exe installer.
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" dist/*.exe --clobber
