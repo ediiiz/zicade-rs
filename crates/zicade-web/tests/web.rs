@@ -216,6 +216,7 @@ async fn status_reflects_state() {
         listen_addr: "127.0.0.1:3129".to_owned(),
         requests_total: 7,
         requests_failed: 1,
+        active_connections: 0,
     });
     let app = router(state);
 
@@ -234,6 +235,52 @@ async fn status_reflects_state() {
     assert_eq!(got.routing_mode, "pac");
     assert_eq!(got.requests_total, 7);
     assert_eq!(got.requests_failed, 1);
+    assert_eq!(got.listen_addr, "127.0.0.1:3129");
+}
+
+struct FakeMetrics;
+impl zicade_web::MetricsSource for FakeMetrics {
+    fn total_requests(&self) -> u64 {
+        42
+    }
+    fn active_connections(&self) -> usize {
+        3
+    }
+    fn failed_requests(&self) -> u64 {
+        5
+    }
+}
+
+#[tokio::test]
+async fn status_reflects_live_metrics() {
+    let state = state_with_config(Config::default());
+    state.set_status(StatusSnapshot {
+        routing_mode: "direct".to_owned(),
+        listen_addr: "127.0.0.1:3129".to_owned(),
+        requests_total: 0,
+        requests_failed: 0,
+        active_connections: 0,
+    });
+    let state = state.with_metrics_source(std::sync::Arc::new(FakeMetrics));
+    let app = router(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let got: StatusSnapshot = serde_json::from_str(&body_string(resp).await).unwrap();
+    // Live metrics overlay the counters; stored fields are preserved.
+    assert_eq!(got.requests_total, 42);
+    assert_eq!(got.active_connections, 3);
+    assert_eq!(got.requests_failed, 5);
+    assert_eq!(got.routing_mode, "direct");
     assert_eq!(got.listen_addr, "127.0.0.1:3129");
 }
 

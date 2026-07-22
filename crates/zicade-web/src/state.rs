@@ -7,6 +7,17 @@ use serde::{Deserialize, Serialize};
 use zicade_config::Config;
 use zicade_observe::LogStore;
 
+/// A source of live proxy metrics the status endpoint can overlay onto its
+/// stored snapshot. Implemented by an adapter over the running proxy handle.
+pub trait MetricsSource: Send + Sync {
+    /// Total requests forwarded since start.
+    fn total_requests(&self) -> u64;
+    /// Connections currently being served.
+    fn active_connections(&self) -> usize;
+    /// Requests that failed since start.
+    fn failed_requests(&self) -> u64;
+}
+
 /// A read-only status snapshot surfaced by `GET /api/status`.
 ///
 /// For M5 there is no live proxy wiring; callers update this via
@@ -22,6 +33,8 @@ pub struct StatusSnapshot {
     pub requests_total: u64,
     /// Requests that failed.
     pub requests_failed: u64,
+    /// Connections currently being served.
+    pub active_connections: usize,
 }
 
 /// Cloneable handle (all fields are `Arc`-backed) passed to every handler.
@@ -32,6 +45,7 @@ pub struct AppState {
     token: Arc<str>,
     logs: LogStore,
     status: Arc<Mutex<StatusSnapshot>>,
+    metrics: Option<Arc<dyn MetricsSource>>,
 }
 
 impl AppState {
@@ -44,7 +58,16 @@ impl AppState {
             token: Arc::from(token),
             logs,
             status: Arc::new(Mutex::new(StatusSnapshot::default())),
+            metrics: None,
         }
+    }
+
+    /// Attach a live metrics source; its counters overlay the stored snapshot in
+    /// [`AppState::status_snapshot`].
+    #[must_use]
+    pub fn with_metrics_source(mut self, src: Arc<dyn MetricsSource>) -> Self {
+        self.metrics = Some(src);
+        self
     }
 
     /// The path the config is persisted to.
@@ -89,9 +112,18 @@ impl AppState {
         self.config.lock().map(|c| c.clone()).unwrap_or_default()
     }
 
-    /// A snapshot clone of the current status.
+    /// A snapshot clone of the current status. If a live metrics source is
+    /// attached, its counters overlay the stored `requests_total`,
+    /// `active_connections`, and `requests_failed` (preserving `routing_mode`
+    /// and `listen_addr`).
     pub(crate) fn status_snapshot(&self) -> StatusSnapshot {
-        self.status.lock().map(|s| s.clone()).unwrap_or_default()
+        let mut snapshot = self.status.lock().map(|s| s.clone()).unwrap_or_default();
+        if let Some(metrics) = &self.metrics {
+            snapshot.requests_total = metrics.total_requests();
+            snapshot.active_connections = metrics.active_connections();
+            snapshot.requests_failed = metrics.failed_requests();
+        }
+        snapshot
     }
 
     /// Replace the in-memory config after a validated update.

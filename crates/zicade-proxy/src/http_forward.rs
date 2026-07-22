@@ -61,6 +61,7 @@ async fn proxy_service(
     match result {
         Ok(resp) => resp,
         Err(err) => {
+            metrics.incr_failed();
             tracing::warn!(error = %err, "http forward failed");
             error_response(StatusCode::BAD_GATEWAY)
         }
