@@ -14,7 +14,7 @@ members = [
 [workspace.package]
 version = "0.1.0" # x-release-please-version
 edition = "2024"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-only"
 rust-version = "1.85"
 
 # Centralized dependency versions. Individual crates opt in with
