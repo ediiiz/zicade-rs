@@ -32,6 +32,11 @@ pub trait MetricsSource: Send + Sync {
 /// moved into the in-memory store.
 pub type ConfigApplyHook = std::sync::Arc<dyn Fn(&Config) + Send + Sync>;
 
+/// A shared cell the corporate-network gate writes the current on-corp state
+/// into; the status snapshot overlays it. `Some(true)`/`Some(false)` = on/off
+/// corp; `None` = the gate is disabled or the state is not yet known.
+pub type OnCorpCell = Arc<Mutex<Option<bool>>>;
+
 /// A read-only status snapshot surfaced by `GET /api/status`.
 ///
 /// `routing_mode` and `listen_addr` are set once at startup via
@@ -53,6 +58,11 @@ pub struct StatusSnapshot {
     pub bytes_in: u64,
     /// Cumulative bytes streamed out to origins/upstreams (upload).
     pub bytes_out: u64,
+    /// Whether the machine is currently on the corporate network, when the
+    /// corp-network gate is active. `None` (omitted from JSON) when the gate is
+    /// disabled or the state is not yet known.
+    #[serde(rename = "onCorp", skip_serializing_if = "Option::is_none", default)]
+    pub on_corp: Option<bool>,
 }
 
 /// Cloneable handle (all fields are `Arc`-backed) passed to every handler.
@@ -65,6 +75,9 @@ pub struct AppState {
     status: Arc<Mutex<StatusSnapshot>>,
     metrics: Option<Arc<dyn MetricsSource>>,
     apply_hook: Option<ConfigApplyHook>,
+    /// Shared on-corp state written by the corp-network gate, overlaid onto the
+    /// status snapshot. `None` when the gate is disabled.
+    on_corp: Option<OnCorpCell>,
     /// Fires (flips to `true`) when the app is shutting down, so long-lived SSE
     /// streams can end and let axum's graceful shutdown complete. `None` (the
     /// default) means "never shut down" — the streams stay open indefinitely,
@@ -84,6 +97,7 @@ impl AppState {
             status: Arc::new(Mutex::new(StatusSnapshot::default())),
             metrics: None,
             apply_hook: None,
+            on_corp: None,
             shutdown: None,
         }
     }
@@ -101,6 +115,14 @@ impl AppState {
     #[must_use]
     pub fn with_apply_hook(mut self, hook: ConfigApplyHook) -> Self {
         self.apply_hook = Some(hook);
+        self
+    }
+
+    /// Attach the corp-network gate's on-corp cell; its value overlays
+    /// `on_corp` in [`AppState::status_snapshot`].
+    #[must_use]
+    pub fn with_on_corp(mut self, cell: OnCorpCell) -> Self {
+        self.on_corp = Some(cell);
         self
     }
 
@@ -183,6 +205,9 @@ impl AppState {
             snapshot.requests_failed = metrics.failed_requests();
             snapshot.bytes_in = metrics.bytes_in();
             snapshot.bytes_out = metrics.bytes_out();
+        }
+        if let Some(cell) = &self.on_corp {
+            snapshot.on_corp = cell.lock().ok().and_then(|c| *c);
         }
         snapshot
     }

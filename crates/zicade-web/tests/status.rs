@@ -131,6 +131,43 @@ async fn status_overlays_live_metrics() {
 }
 
 #[tokio::test]
+async fn status_overlays_on_corp() {
+    // The corp-network gate writes on-corp state into a shared cell that the
+    // status snapshot overlays live; a disabled gate (no cell) omits the field.
+    let cell: zicade_web::OnCorpCell = std::sync::Arc::new(std::sync::Mutex::new(Some(false)));
+    let state = state_with_config(Config::default()).with_on_corp(cell.clone());
+    let app = router(state.clone());
+
+    let get_status = |app: axum::Router| async move {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let got: StatusSnapshot = serde_json::from_str(&body_string(resp).await).unwrap();
+        got
+    };
+
+    assert_eq!(
+        get_status(app).await.on_corp,
+        Some(false),
+        "off-corp overlaid"
+    );
+
+    *cell.lock().unwrap() = Some(true);
+    let app = router(state);
+    assert_eq!(
+        get_status(app).await.on_corp,
+        Some(true),
+        "on-corp overlaid live"
+    );
+}
+
+#[tokio::test]
 async fn metrics_sse_streams_a_snapshot() {
     let state = state_with_config(Config::default());
     let state = state.with_metrics_source(std::sync::Arc::new(FakeMetrics));

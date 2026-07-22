@@ -30,6 +30,17 @@ function toggleSections() {
   const mode = getStr("routing.mode");
   $(".section-upstream").hidden = mode !== "upstream";
   $(".section-pac").hidden = mode !== "pac";
+  // The corp-network gate applies to pac + upstream (it falls back to direct).
+  $(".section-corp").hidden = mode !== "pac" && mode !== "upstream";
+}
+
+// Parse the DNS-suffix textarea (newline- or comma-separated) into a trimmed,
+// non-empty array.
+function getSuffixes() {
+  return getStr("corpNetwork.dnsSuffixes")
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 // Build the config JSON from the form. Optional sections/fields are only
@@ -63,6 +74,16 @@ function collect() {
     if (url) pac.url = url;
     cfg.routing.pac = pac;
   }
+  // The corp-network gate applies to pac + upstream; only sent for those modes.
+  if (mode === "pac" || mode === "upstream") {
+    const enabled = getBool("corpNetwork.enabled");
+    const poll = parseInt(getStr("corpNetwork.pollSeconds"), 10);
+    cfg.routing.corpNetwork = {
+      enabled,
+      dnsSuffixes: getSuffixes(),
+      pollSeconds: Number.isFinite(poll) && poll > 0 ? poll : 30,
+    };
+  }
   return cfg;
 }
 
@@ -83,6 +104,10 @@ function populate(cfg) {
   setStr("pac.url", pac.url ?? "");
   setStr("pac.failPolicy", pac.failPolicy ?? "error");
   setStr("pac.auth.mode", pac.auth?.mode ?? "none");
+  const corp = cfg.routing?.corpNetwork ?? {};
+  setBool("corpNetwork.enabled", corp.enabled ?? false);
+  setStr("corpNetwork.dnsSuffixes", (corp.dnsSuffixes ?? []).join("\n"));
+  setStr("corpNetwork.pollSeconds", corp.pollSeconds ?? 30);
   setStr("logging.level", cfg.logging?.level ?? "info");
   setStr("logging.format", cfg.logging?.format ?? "json");
   setBool("web.authRequired", cfg.web?.authRequired ?? false);
@@ -156,6 +181,14 @@ function drawSpark() {
 
 function applySnapshot(s) {
   $("#st-mode").textContent = s.routing_mode || "—";
+  // on-corp is present only when the corp-network gate is active.
+  const corpBox = $("#st-corp-box");
+  if (typeof s.onCorp === "boolean") {
+    corpBox.hidden = false;
+    $("#st-corp").textContent = s.onCorp ? "yes" : "no";
+  } else {
+    corpBox.hidden = true;
+  }
   $("#st-listen").textContent = s.listen_addr || "—";
   $("#st-total").textContent = fmtInt(s.requests_total);
   const f = $("#st-failed");

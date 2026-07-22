@@ -99,7 +99,11 @@ impl App {
         // into `Self`. Either the apply hook (ungated) or the gate (gated) swaps
         // routing here, so changes take effect without a restart.
         let routing_handle = proxy.routing_handle();
-        let (hook, gate) = build_apply_hook_and_gate(&config, gate_enabled, &routing_handle);
+        // Shared on-corp state (gate → web status), present only when gated.
+        let on_corp_cell: Option<zicade_web::OnCorpCell> =
+            gate_enabled.then(|| std::sync::Arc::new(std::sync::Mutex::new(None)));
+        let (hook, gate) =
+            build_apply_hook_and_gate(&config, &routing_handle, on_corp_cell.clone());
 
         // The web server sits on the proxy port + 1 (both loopback).
         let web_port = proxy_addr
@@ -123,6 +127,10 @@ impl App {
         let state = state.with_metrics_source(std::sync::Arc::new(ProxyMetricsSource(metrics)));
         let state = state.with_apply_hook(hook);
         let state = state.with_shutdown(shutdown_rx);
+        let state = match on_corp_cell {
+            Some(cell) => state.with_on_corp(cell),
+            None => state,
+        };
         state.set_status(StatusSnapshot {
             routing_mode: routing_mode.to_owned(),
             listen_addr: proxy_addr.to_string(),
@@ -226,13 +234,13 @@ fn routing_mode_label(mode: RoutingMode) -> &'static str {
 ///   pre-existing live-apply behavior).
 fn build_apply_hook_and_gate(
     config: &Config,
-    gate_enabled: bool,
     routing_handle: &zicade_proxy::RoutingHandle,
+    on_corp_cell: Option<zicade_web::OnCorpCell>,
 ) -> (
     zicade_web::ConfigApplyHook,
     Option<crate::netmon::NetworkGate>,
 ) {
-    if gate_enabled {
+    if let Some(cell) = on_corp_cell {
         let gate = crate::netmon::NetworkGate::new(
             routing_handle.clone(),
             config.clone(),
@@ -247,7 +255,11 @@ fn build_apply_hook_and_gate(
                 }
             }),
             Box::new(zicade_win::active_dns_suffixes),
-            Box::new(|_corp| {}),
+            Box::new(move |corp: bool| {
+                if let Ok(mut c) = cell.lock() {
+                    *c = Some(corp);
+                }
+            }),
         );
         // Set the correct initial routing before the proxy begins serving.
         gate.evaluate_now();

@@ -18,5 +18,5 @@ mod state;
 mod token;
 
 pub use router::{TOKEN_HEADER, router};
-pub use state::{AppState, ConfigApplyHook, MetricsSource, StatusSnapshot};
+pub use state::{AppState, ConfigApplyHook, MetricsSource, OnCorpCell, StatusSnapshot};
 pub use token::load_or_create_token;
