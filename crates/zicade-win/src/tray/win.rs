@@ -20,10 +20,12 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetMessageW, IDI_APPLICATION, LoadIconW, MF_STRING, MSG,
-    PostMessageW, PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOWNORMAL, SetForegroundWindow,
-    ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, HICON, IDI_APPLICATION,
+    IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED, LoadIconW, LoadImageW, MF_STRING, MSG, PostMessageW,
+    PostQuitMessage, RegisterClassW, SM_CXSMICON, SM_CYSMICON, SW_HIDE, SW_SHOWNORMAL,
+    SetForegroundWindow, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_NULL,
+    WM_RBUTTONUP, WNDCLASSW,
 };
 use windows::core::{PCWSTR, w};
 
@@ -177,10 +179,50 @@ fn create_window() -> Result<HWND, WinError> {
     Ok(hwnd)
 }
 
+/// Resource id of the app icon embedded into the executable by `apps/zicade`'s
+/// build script (`1 ICON "assets/zicade.ico"`).
+const APP_ICON_RESOURCE_ID: u16 = 1;
+
+/// Load the Zicade app icon at the system small-icon size for the tray.
+///
+/// The icon is loaded from the running module (the exe), where the build script
+/// embeds it as [`APP_ICON_RESOURCE_ID`]. `LR_SHARED` means the system owns the
+/// cached handle (no `DestroyIcon` needed), matching the old `LoadIconW` path.
+/// If the resource is absent — e.g. a test harness that doesn't embed it — we
+/// fall back to the shared system application icon.
+fn load_tray_icon() -> HICON {
+    // SAFETY: a null module name asks for the current process's module handle; it
+    // fails only in pathological cases, where we drop to the fallback below.
+    if let Ok(module) = unsafe { GetModuleHandleW(PCWSTR::null()) } {
+        // SAFETY: GetSystemMetrics just reads a system-wide constant.
+        let cx = unsafe { GetSystemMetrics(SM_CXSMICON) };
+        let cy = unsafe { GetSystemMetrics(SM_CYSMICON) };
+        // SAFETY: loads icon resource `APP_ICON_RESOURCE_ID` from our module at
+        // the small-icon size. Casting the numeric id to a pointer is the
+        // documented MAKEINTRESOURCE convention for naming a resource by id.
+        let loaded = unsafe {
+            LoadImageW(
+                Some(module.into()),
+                PCWSTR(APP_ICON_RESOURCE_ID as usize as *const u16),
+                IMAGE_ICON,
+                cx,
+                cy,
+                LR_DEFAULTCOLOR | LR_SHARED,
+            )
+        };
+        if let Ok(handle) = loaded {
+            if !handle.is_invalid() {
+                return HICON(handle.0);
+            }
+        }
+    }
+    // SAFETY: a null instance with IDI_APPLICATION loads the shared system icon.
+    unsafe { LoadIconW(None, IDI_APPLICATION) }.unwrap_or_default()
+}
+
 /// Build the notify-icon data for `hwnd` with the given tooltip.
 fn icon_data(hwnd: HWND, tooltip: &str) -> NOTIFYICONDATAW {
-    // SAFETY: a null instance with IDI_APPLICATION loads the shared system icon.
-    let hicon = unsafe { LoadIconW(None, IDI_APPLICATION) }.unwrap_or_default();
+    let hicon = load_tray_icon();
 
     let mut sz_tip = [0u16; 128];
     for (dst, src) in sz_tip.iter_mut().zip(tooltip.encode_utf16()).take(127) {

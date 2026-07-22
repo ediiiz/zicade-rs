@@ -1,0 +1,5 @@
+// Windows resource script: embed the Zicade app icon as resource id 1.
+// Compiled by build.rs into the executable so Explorer, the taskbar/console
+// window, and the system tray all show the Zicade logo. Resource id 1 is the
+// lowest icon id, which is the one the shell uses as the executable's icon.
+1 ICON "assets/zicade.ico"

@@ -1,0 +1,57 @@
+name: ci
+
+# Gate every PR (and pushes to main) on formatting, lints, tests, and a binary
+# build. Like the release job, CI builds with the MSVC toolchain preinstalled on
+# windows-latest and overrides the developer-local GNU settings in
+# .cargo/config.toml: `--target ...-msvc` overrides the pinned GNU target and
+# `build.rustflags=[]` drops the GNU-only `-Cdlltool`. The crates are Windows-only
+# (windows-crate FFI), so all jobs run on Windows.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TARGET_DIR: target
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msvc
+
+      - name: Format
+        shell: bash
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        shell: bash
+        run: cargo clippy --workspace --all-targets --target "$TARGET" --config "build.rustflags=[]" -- -D warnings
+
+      - name: Test
+        shell: bash
+        run: cargo test --workspace --target "$TARGET" --config "build.rustflags=[]"
+
+      - name: Build binary (verifies the app-icon embed)
+        shell: bash
+        run: cargo build -p zicade --target "$TARGET" --config "build.rustflags=[]"

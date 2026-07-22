@@ -1,0 +1,63 @@
+name: release-please
+
+# Release automation:
+#   1. On every push to main, release-please maintains a rolling "release PR"
+#      that accumulates conventional-commit changes and bumps the version — it
+#      edits .release-please-manifest.json and, via the `x-release-please-version`
+#      annotation, the workspace version in Cargo.toml, and updates CHANGELOG.md.
+#   2. When that PR is merged, release-please tags the commit and creates the
+#      GitHub Release; the build job then compiles the Windows release .exe and
+#      attaches it to that release.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows-exe:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: windows-latest
+    env:
+      # The repo's .cargo/config.toml targets a developer-specific w64devkit
+      # (GNU) toolchain via absolute paths. CI builds natively with the MSVC
+      # toolchain preinstalled on windows-latest: `--target ...-msvc` overrides
+      # the pinned GNU target, `build.rustflags=[]` drops the GNU-only
+      # `-Cdlltool`, and CARGO_TARGET_DIR redirects the absolute target dir into
+      # the workspace. The app icon is still embedded (embed-resource uses the
+      # SDK's rc.exe on MSVC).
+      CARGO_TARGET_DIR: target
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build release binary (MSVC)
+        shell: bash
+        run: cargo build --release -p zicade --target x86_64-pc-windows-msvc --config "build.rustflags=[]"
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/x86_64-pc-windows-msvc/release/zicade.exe" \
+             "dist/zicade-${{ needs.release-please.outputs.tag_name }}-x86_64-pc-windows-msvc.exe"
+      - name: Attach binary to the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" dist/*.exe --clobber
