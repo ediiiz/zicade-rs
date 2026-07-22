@@ -53,6 +53,16 @@ pub struct RoutingConfig {
     pub upstream: Option<UpstreamConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pac: Option<PacConfig>,
+    /// Optional corporate-network gate. When present and enabled (for `pac`/
+    /// `upstream` modes) the effective routing follows the configured mode only
+    /// while an active adapter's DNS suffix matches [`CorpNetworkConfig`]; off
+    /// the corporate network it falls back to `Direct`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "corpNetwork"
+    )]
+    pub corp_network: Option<CorpNetworkConfig>,
 }
 
 impl RoutingConfig {
@@ -115,6 +125,44 @@ pub struct PacConfig {
     /// Applied to PAC-selected upstreams (LESSON-6).
     #[serde(default)]
     pub auth: AuthConfig,
+}
+
+/// Corporate-network detection gate.
+///
+/// When `enabled`, a background monitor inspects the active network adapters'
+/// DNS suffixes; the configured routing (`pac`/`upstream`) applies only while at
+/// least one active suffix matches one of `dns_suffixes` (case-insensitive,
+/// dot-boundary — e.g. `dy.droot.org` matches `droot.org`). Off the corporate
+/// network the proxy routes `Direct`. Defaults to **disabled** so older configs
+/// are unaffected.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorpNetworkConfig {
+    /// Whether the gate is active. Default `false`.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Corporate DNS suffixes that identify the corporate network, e.g.
+    /// `["droot.org"]`. Required (non-empty) when `enabled`.
+    #[serde(default, rename = "dnsSuffixes")]
+    pub dns_suffixes: Vec<String>,
+    /// How often (seconds) to re-check the network as a fallback to change
+    /// events. Default 30.
+    #[serde(default = "default_poll_seconds", rename = "pollSeconds")]
+    pub poll_seconds: u64,
+}
+
+impl Default for CorpNetworkConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dns_suffixes: Vec::new(),
+            poll_seconds: default_poll_seconds(),
+        }
+    }
+}
+
+/// Default re-check interval for [`CorpNetworkConfig::poll_seconds`].
+fn default_poll_seconds() -> u64 {
+    30
 }
 
 /// Upstream authentication scheme.

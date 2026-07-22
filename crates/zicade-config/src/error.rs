@@ -35,4 +35,9 @@ pub enum ConfigError {
     /// may be empty for some proxies, but a username is always required.
     #[error("auth mode 'basic' in {field} requires a non-empty username")]
     MissingCredentials { field: &'static str },
+
+    /// `routing.corpNetwork` is enabled but misconfigured (e.g. no DNS suffixes,
+    /// or a zero poll interval).
+    #[error("routing.corpNetwork is invalid: {reason}")]
+    CorpNetwork { reason: &'static str },
 }
