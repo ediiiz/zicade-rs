@@ -11,6 +11,7 @@
 
 mod app;
 pub mod cli;
+mod netmon;
 mod pac_router;
 mod routing;
 

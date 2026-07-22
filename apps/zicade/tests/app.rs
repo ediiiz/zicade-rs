@@ -148,6 +148,7 @@ async fn invalid_config_fails_fast() {
             mode: RoutingMode::Upstream,
             upstream: None,
             pac: None,
+            corp_network: None,
         },
         ..Default::default()
     };
@@ -199,6 +200,7 @@ fn build_routing_maps_direct_and_upstream() {
                 },
             }),
             pac: None,
+            corp_network: None,
         },
         ..Default::default()
     };
