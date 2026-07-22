@@ -16,6 +16,34 @@ use crate::upstream::Routing;
 /// to drain before aborting stragglers.
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// A cloneable, thread-safe handle to the proxy's live [`Routing`].
+///
+/// The proxy clones the *current* routing per accepted connection, so swapping
+/// the value behind this handle takes effect on the next connection without a
+/// restart. This is the seam the web layer uses to apply routing edits live.
+#[derive(Clone, Debug)]
+pub struct RoutingHandle(std::sync::Arc<std::sync::Mutex<Routing>>);
+
+impl RoutingHandle {
+    /// Wrap an initial routing in a fresh shared handle.
+    pub fn new(routing: Routing) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(routing)))
+    }
+
+    /// A clone of the current routing (falls back to [`Routing::Direct`] if the
+    /// lock is poisoned rather than panicking).
+    pub fn current(&self) -> Routing {
+        self.0.lock().map(|g| g.clone()).unwrap_or_default()
+    }
+
+    /// Atomically replace the routing; observed by the next accepted connection.
+    pub fn set(&self, routing: Routing) {
+        if let Ok(mut g) = self.0.lock() {
+            *g = routing;
+        }
+    }
+}
+
 /// A bound proxy listener, ready to serve in direct mode.
 #[derive(Debug)]
 pub struct ProxyServer {
@@ -23,7 +51,7 @@ pub struct ProxyServer {
     local_addr: SocketAddr,
     metrics: ProxyMetrics,
     shutdown_timeout: Duration,
-    routing: Routing,
+    routing: RoutingHandle,
 }
 
 impl ProxyServer {
@@ -39,7 +67,7 @@ impl ProxyServer {
             local_addr,
             metrics: ProxyMetrics::default(),
             shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
-            routing: Routing::Direct,
+            routing: RoutingHandle::new(Routing::Direct),
         })
     }
 
@@ -53,9 +81,15 @@ impl ProxyServer {
     /// Select the routing mode (direct, or through a configured upstream proxy).
     /// Defaults to [`Routing::Direct`], preserving M2 behavior.
     #[must_use]
-    pub fn with_routing(mut self, routing: Routing) -> Self {
-        self.routing = routing;
+    pub fn with_routing(self, routing: Routing) -> Self {
+        self.routing.set(routing);
         self
+    }
+
+    /// A cloneable handle to the live routing, for swapping it after `bind`
+    /// (e.g. the web layer rebuilds routing on a config apply).
+    pub fn routing_handle(&self) -> RoutingHandle {
+        self.routing.clone()
     }
 
     /// The actual bound address (useful when binding to port 0).
@@ -84,7 +118,7 @@ impl ProxyServer {
                 accepted = self.listener.accept() => {
                     if let Ok((stream, _peer)) = accepted {
                         let metrics = self.metrics.clone();
-                        let routing = self.routing.clone();
+                        let routing = self.routing.current();
                         conns.spawn(handle_connection(stream, metrics, routing));
                     }
                     // Transient accept errors are ignored; the loop continues.
@@ -104,5 +138,41 @@ async fn drain(conns: &mut JoinSet<()>, timeout: Duration) {
     if tokio::time::timeout(timeout, wait_all).await.is_err() {
         conns.abort_all();
         while conns.join_next().await.is_some() {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::upstream::{UpstreamAuth, UpstreamTarget};
+
+    #[test]
+    fn routing_handle_reflects_set() {
+        let handle = RoutingHandle::new(Routing::Direct);
+        assert_eq!(format!("{:?}", handle.current()), "Direct");
+
+        handle.set(Routing::Upstream(UpstreamTarget {
+            addr: "127.0.0.1:8080".to_owned(),
+            auth: UpstreamAuth::None,
+        }));
+        assert_eq!(format!("{:?}", handle.current()), "Upstream");
+    }
+
+    #[tokio::test]
+    async fn routing_handle_shares_state_with_server() {
+        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+        let server = ProxyServer::bind(addr).await.expect("bind");
+        let handle = server.routing_handle();
+
+        // The server starts in direct mode.
+        assert_eq!(format!("{:?}", server.routing.current()), "Direct");
+
+        // Setting through the shared handle is observed by the server's own
+        // handle: they point at the same underlying routing.
+        handle.set(Routing::Upstream(UpstreamTarget {
+            addr: "127.0.0.1:8080".to_owned(),
+            auth: UpstreamAuth::None,
+        }));
+        assert_eq!(format!("{:?}", server.routing.current()), "Upstream");
     }
 }

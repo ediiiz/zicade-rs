@@ -13,5 +13,5 @@ mod upstream;
 
 pub use error::ProxyError;
 pub use metrics::ProxyMetrics;
-pub use server::ProxyServer;
+pub use server::{ProxyServer, RoutingHandle};
 pub use upstream::{AuthFactory, PacRouter, RouteChoice, Routing, UpstreamAuth, UpstreamTarget};

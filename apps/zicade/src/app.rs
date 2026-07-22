@@ -73,6 +73,22 @@ impl App {
             .with_routing(routing);
         let proxy_addr = proxy.local_addr();
 
+        // A live handle to the proxy's routing, captured before `proxy` is
+        // moved into `Self`. The apply hook rebuilds routing from the new
+        // config and swaps it here, so UI edits take effect without a restart.
+        let routing_handle = proxy.routing_handle();
+        let apply_handle = routing_handle.clone();
+        let hook: zicade_web::ConfigApplyHook =
+            std::sync::Arc::new(move |cfg: &zicade_config::Config| {
+                match crate::routing::build_routing(cfg) {
+                    Ok(routing) => apply_handle.set(routing),
+                    Err(err) => tracing::error!(
+                        error = %format!("{err:#}"),
+                        "failed to rebuild routing on live config apply"
+                    ),
+                }
+            });
+
         // The web server sits on the proxy port + 1 (both loopback).
         let web_port = proxy_addr
             .port()
@@ -88,6 +104,7 @@ impl App {
 
         let state = AppState::new(config, config_path, token, logs);
         let state = state.with_metrics_source(std::sync::Arc::new(ProxyMetricsSource(metrics)));
+        let state = state.with_apply_hook(hook);
         state.set_status(StatusSnapshot {
             routing_mode: routing_mode.to_owned(),
             listen_addr: proxy_addr.to_string(),

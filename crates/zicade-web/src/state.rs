@@ -18,11 +18,19 @@ pub trait MetricsSource: Send + Sync {
     fn failed_requests(&self) -> u64;
 }
 
+/// A side-effecting hook run when a validated config is applied live.
+///
+/// The app wires this to rebuild the proxy's routing and swap it behind the
+/// shared [`zicade_proxy::RoutingHandle`], so UI routing edits take effect
+/// without a restart. Invoked with a reference just before the new config is
+/// moved into the in-memory store.
+pub type ConfigApplyHook = std::sync::Arc<dyn Fn(&Config) + Send + Sync>;
+
 /// A read-only status snapshot surfaced by `GET /api/status`.
 ///
-/// For M5 there is no live proxy wiring; callers update this via
-/// [`AppState::set_status`]. Fields cover the routing mode, the bound listen
-/// address, and simple request counters.
+/// `routing_mode` and `listen_addr` are set once at startup via
+/// [`AppState::set_status`]; the request counters are overlaid live from the
+/// attached [`MetricsSource`] (see [`AppState::status_snapshot`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusSnapshot {
     /// Active routing mode (`"direct"`, `"upstream"`, `"pac"`).
@@ -46,6 +54,7 @@ pub struct AppState {
     logs: LogStore,
     status: Arc<Mutex<StatusSnapshot>>,
     metrics: Option<Arc<dyn MetricsSource>>,
+    apply_hook: Option<ConfigApplyHook>,
 }
 
 impl AppState {
@@ -59,6 +68,7 @@ impl AppState {
             logs,
             status: Arc::new(Mutex::new(StatusSnapshot::default())),
             metrics: None,
+            apply_hook: None,
         }
     }
 
@@ -67,6 +77,14 @@ impl AppState {
     #[must_use]
     pub fn with_metrics_source(mut self, src: Arc<dyn MetricsSource>) -> Self {
         self.metrics = Some(src);
+        self
+    }
+
+    /// Attach a hook invoked with each validated config on
+    /// [`AppState::apply_config`] (used by the app to rebuild live routing).
+    #[must_use]
+    pub fn with_apply_hook(mut self, hook: ConfigApplyHook) -> Self {
+        self.apply_hook = Some(hook);
         self
     }
 
@@ -126,8 +144,12 @@ impl AppState {
         snapshot
     }
 
-    /// Replace the in-memory config after a validated update.
+    /// Replace the in-memory config after a validated update, first running the
+    /// apply hook (if any) so live routing is rebuilt from the new config.
     pub(crate) fn apply_config(&self, config: Config) {
+        if let Some(hook) = &self.apply_hook {
+            hook(&config);
+        }
         if let Ok(mut guard) = self.config.lock() {
             *guard = config;
         }
