@@ -70,7 +70,7 @@ pub fn run_tray_mode() -> ExitCode {
 
     // Install the subscriber (logs flow to the web UI), then hide the console.
     let (observe_layer, logs) = channel_layer(LOG_BUFFER_CAP);
-    init_tracing(&config.logging, observe_layer);
+    let log_reload = init_tracing(&config.logging, observe_layer);
     if let Err(err) = tray::hide_console() {
         tracing::warn!(%err, "could not hide the console window");
     }
@@ -79,7 +79,7 @@ pub fn run_tray_mode() -> ExitCode {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let server = thread::Builder::new()
         .name("zicade-runtime".to_owned())
-        .spawn(move || serve_on_runtime(config, config_path, logs, shutdown_rx))
+        .spawn(move || serve_on_runtime(config, config_path, logs, log_reload, shutdown_rx))
         .expect("spawn zicade runtime thread");
 
     let pump = tray::run_tray("Zicade proxy", tray_menu_items(), move |id| {
@@ -120,6 +120,7 @@ fn serve_on_runtime(
     config: Config,
     config_path: PathBuf,
     logs: LogStore,
+    log_reload: zicade::LogReload,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let runtime = match tokio::runtime::Runtime::new() {
@@ -132,7 +133,8 @@ fn serve_on_runtime(
     let shutdown = async move {
         let _ = shutdown_rx.wait_for(|flag| *flag).await;
     };
-    if let Err(err) = runtime.block_on(zicade::run(config, config_path, logs, shutdown)) {
+    if let Err(err) = runtime.block_on(zicade::run(config, config_path, logs, log_reload, shutdown))
+    {
         tracing::error!(error = %format!("{err:#}"), "tray-mode server exited with an error");
     }
 }

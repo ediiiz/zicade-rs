@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
-use zicade::{App, build_routing};
+use zicade::{App, build_routing, noop_log_reload};
 use zicade_config::{
     AuthConfig, AuthMode, Config, ListenConfig, RoutingConfig, RoutingMode, UpstreamConfig,
 };
@@ -67,7 +67,14 @@ async fn free_port_pair() -> u16 {
 async fn start_direct_app(logs: LogStore) -> (App, u16) {
     for _ in 0..50 {
         let port = free_port_pair().await;
-        match App::start(direct_config(port), temp_config_path(), logs.clone()).await {
+        match App::start(
+            direct_config(port),
+            temp_config_path(),
+            logs.clone(),
+            noop_log_reload(),
+        )
+        .await
+        {
             Ok(app) => return (app, port),
             // Port taken between probe and bind: try another pair.
             Err(_) => continue,
@@ -168,7 +175,7 @@ async fn invalid_config_fails_fast() {
     };
     let res = tokio::time::timeout(
         Duration::from_secs(2),
-        App::start(cfg, temp_config_path(), logs),
+        App::start(cfg, temp_config_path(), logs, noop_log_reload()),
     )
     .await
     .expect("start must return promptly, not hang");
@@ -184,7 +191,12 @@ async fn port_in_use_fails_fast() {
 
     let res = tokio::time::timeout(
         Duration::from_secs(2),
-        App::start(direct_config(taken), temp_config_path(), logs),
+        App::start(
+            direct_config(taken),
+            temp_config_path(),
+            logs,
+            noop_log_reload(),
+        ),
     )
     .await
     .expect("start must return promptly, not hang");

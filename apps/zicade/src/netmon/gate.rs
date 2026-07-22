@@ -22,9 +22,10 @@ type Rebuild = Box<dyn Fn(&Config) -> Routing + Send>;
 /// A closure yielding the active adapter DNS suffixes (real one is
 /// `zicade_win::active_dns_suffixes`; tests inject a fake).
 type Detect = Box<dyn Fn() -> Vec<String> + Send>;
-/// A closure invoked on each on-corp transition with the new state (M5 wires it
-/// to the web status; a no-op otherwise).
-type Report = Box<dyn Fn(bool) + Send>;
+/// A closure invoked with the current on-corp state whenever it changes:
+/// `Some(true)`/`Some(false)` on an on-/off-corp transition, and `None` when the
+/// gate is disabled (so the web status stops reporting a stale `onCorp`).
+type Report = Box<dyn Fn(Option<bool>) + Send>;
 
 /// Whether the corporate-network gate is enabled in `config`.
 pub(crate) fn gate_enabled(config: &Config) -> bool {
@@ -89,7 +90,7 @@ impl GateInner {
             "corp-network gate: applying routing"
         );
         self.routing.set(routing);
-        (self.report)(corp);
+        (self.report)(Some(corp));
     }
 
     /// Adopt a new config: refresh suffixes/poll and re-evaluate. If the gate was
@@ -107,6 +108,8 @@ impl GateInner {
             let routing = (self.rebuild)(&self.config);
             tracing::info!("corp-network gate disabled; applying configured routing");
             self.routing.set(routing);
+            // Clear any stale on-corp state so the web status stops reporting it.
+            (self.report)(None);
         }
     }
 }
@@ -231,7 +234,7 @@ mod tests {
             config,
             Box::new(|_cfg| intended()),
             Box::new(move || active.lock().unwrap().clone()),
-            Box::new(move |_corp| {
+            Box::new(move |_state: Option<bool>| {
                 transitions.fetch_add(1, Ordering::SeqCst);
             }),
         );
