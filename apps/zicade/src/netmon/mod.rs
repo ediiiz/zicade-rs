@@ -6,8 +6,13 @@
 //! (`pac`/`upstream`) applies; off-corp the proxy routes `Direct`.
 //!
 //! This module keeps the *decision* ([`on_corp`]) pure and OS-independent so it
-//! is unit-testable everywhere; the platform suffix enumeration and network
-//! change events live in `zicade-win` and are injected into the supervisor.
+//! is unit-testable everywhere; the [`gate`] submodule holds the supervisor,
+//! into which the platform suffix enumeration and network change events (from
+//! `zicade-win`) are injected.
+
+mod gate;
+
+pub(crate) use gate::{NetworkGate, gate_enabled};
 
 /// Decide whether any `active` DNS suffix indicates the corporate network,
 /// given the `configured` corporate suffixes.
@@ -17,9 +22,6 @@
 /// `dy.droot.org` matches `droot.org`, but `notdroot.org` does not). Leading and
 /// trailing dots and surrounding whitespace are ignored on both sides; empty
 /// entries never match.
-// The supervisor that consumes this lands in M4; until then only the unit tests
-// exercise it. TODO(M4): remove this allow once `NetworkGate` calls `on_corp`.
-#[allow(dead_code)]
 pub(crate) fn on_corp(active: &[String], configured: &[String]) -> bool {
     let wanted: Vec<String> = configured.iter().filter_map(|c| normalize(c)).collect();
     if wanted.is_empty() {

@@ -54,6 +54,10 @@ pub struct App {
     /// ends the long-lived SSE responses so axum's graceful shutdown completes
     /// instead of waiting forever on an open browser tab.
     shutdown_tx: watch::Sender<bool>,
+    /// The corporate-network gate, when enabled. Its monitor thread is spawned in
+    /// [`App::run`] (so it observes the same shutdown signal) and gates live
+    /// routing between the configured mode (on-corp) and `Direct` (off-corp).
+    gate: Option<crate::netmon::NetworkGate>,
 }
 
 impl App {
@@ -68,8 +72,8 @@ impl App {
         config
             .validate(&ValidationCtx::host())
             .context("configuration is invalid")?;
-        let routing = build_routing(&config)?;
         let routing_mode = routing_mode_label(config.routing.mode);
+        let gate_enabled = crate::netmon::gate_enabled(&config);
 
         let host: IpAddr =
             config.listen.host.parse().with_context(|| {
@@ -80,27 +84,22 @@ impl App {
         // fast without leaving listeners open.
         let token = load_or_create_token().context("failed to load or create the UI token")?;
 
-        let proxy = ProxyServer::bind(SocketAddr::new(host, config.listen.port))
+        // Bind the proxy. When the corp-network gate is enabled it owns the live
+        // routing (set by the gate below); otherwise the configured routing is
+        // fixed now, failing fast on a build error.
+        let mut proxy = ProxyServer::bind(SocketAddr::new(host, config.listen.port))
             .await
-            .context("failed to bind the proxy listener")?
-            .with_routing(routing);
+            .context("failed to bind the proxy listener")?;
+        if !gate_enabled {
+            proxy = proxy.with_routing(build_routing(&config)?);
+        }
         let proxy_addr = proxy.local_addr();
 
-        // A live handle to the proxy's routing, captured before `proxy` is
-        // moved into `Self`. The apply hook rebuilds routing from the new
-        // config and swaps it here, so UI edits take effect without a restart.
+        // A live handle to the proxy's routing, captured before `proxy` is moved
+        // into `Self`. Either the apply hook (ungated) or the gate (gated) swaps
+        // routing here, so changes take effect without a restart.
         let routing_handle = proxy.routing_handle();
-        let apply_handle = routing_handle.clone();
-        let hook: zicade_web::ConfigApplyHook =
-            std::sync::Arc::new(move |cfg: &zicade_config::Config| {
-                match crate::routing::build_routing(cfg) {
-                    Ok(routing) => apply_handle.set(routing),
-                    Err(err) => tracing::error!(
-                        error = %format!("{err:#}"),
-                        "failed to rebuild routing on live config apply"
-                    ),
-                }
-            });
+        let (hook, gate) = build_apply_hook_and_gate(&config, gate_enabled, &routing_handle);
 
         // The web server sits on the proxy port + 1 (both loopback).
         let web_port = proxy_addr
@@ -137,6 +136,7 @@ impl App {
             web_addr,
             router: router(state),
             shutdown_tx,
+            gate,
         })
     }
 
@@ -159,8 +159,15 @@ impl App {
             web_listener,
             router,
             shutdown_tx: tx,
+            gate,
             ..
         } = self;
+
+        // Start the corp-network gate's monitor thread now, sharing the same
+        // shutdown signal so it winds down with everything else.
+        if let Some(gate) = gate {
+            gate.spawn(tx.subscribe());
+        }
 
         let proxy_tx = tx.clone();
         let proxy_fut = {
@@ -207,5 +214,57 @@ fn routing_mode_label(mode: RoutingMode) -> &'static str {
         RoutingMode::Direct => "direct",
         RoutingMode::Upstream => "upstream",
         RoutingMode::Pac => "pac",
+    }
+}
+
+/// Build the config-apply hook and, when the corp-network gate is enabled, the
+/// gate itself.
+///
+/// - **Gated:** the gate owns live routing; its initial routing is applied
+///   synchronously (before serving) and the apply hook reconfigures the gate.
+/// - **Ungated:** the apply hook rebuilds routing and swaps it directly (the
+///   pre-existing live-apply behavior).
+fn build_apply_hook_and_gate(
+    config: &Config,
+    gate_enabled: bool,
+    routing_handle: &zicade_proxy::RoutingHandle,
+) -> (
+    zicade_web::ConfigApplyHook,
+    Option<crate::netmon::NetworkGate>,
+) {
+    if gate_enabled {
+        let gate = crate::netmon::NetworkGate::new(
+            routing_handle.clone(),
+            config.clone(),
+            Box::new(|cfg: &Config| match build_routing(cfg) {
+                Ok(routing) => routing,
+                Err(err) => {
+                    tracing::error!(
+                        error = %format!("{err:#}"),
+                        "corp-network gate: routing rebuild failed; using Direct"
+                    );
+                    zicade_proxy::Routing::Direct
+                }
+            }),
+            Box::new(zicade_win::active_dns_suffixes),
+            Box::new(|_corp| {}),
+        );
+        // Set the correct initial routing before the proxy begins serving.
+        gate.evaluate_now();
+        let hook_gate = gate.clone();
+        let hook: zicade_web::ConfigApplyHook =
+            std::sync::Arc::new(move |cfg: &Config| hook_gate.reconfigure(cfg.clone()));
+        (hook, Some(gate))
+    } else {
+        let apply_handle = routing_handle.clone();
+        let hook: zicade_web::ConfigApplyHook =
+            std::sync::Arc::new(move |cfg: &Config| match build_routing(cfg) {
+                Ok(routing) => apply_handle.set(routing),
+                Err(err) => tracing::error!(
+                    error = %format!("{err:#}"),
+                    "failed to rebuild routing on live config apply"
+                ),
+            });
+        (hook, None)
     }
 }
