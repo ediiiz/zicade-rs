@@ -2,7 +2,7 @@
 //! an injected [`ValidationCtx`] so they are testable on any OS.
 
 use crate::error::ConfigError;
-use crate::model::{AuthConfig, AuthMode, Config, RoutingMode};
+use crate::model::{AuthConfig, AuthMode, Config, CorpNetworkConfig, RoutingMode};
 
 /// Platform capabilities the validator needs. Injected so tests can exercise
 /// both the Windows and non-Windows branches deterministically.
@@ -57,8 +57,31 @@ impl Config {
         if let Some(pac) = &self.routing.pac {
             check_auth(&pac.auth, "routing.pac.auth", ctx)?;
         }
+        if let Some(corp) = &self.routing.corp_network {
+            check_corp_network(corp)?;
+        }
         Ok(())
     }
+}
+
+/// Validate the corporate-network gate. Only enforced when `enabled`: a disabled
+/// gate carries no requirements (older/partial configs load unchanged).
+fn check_corp_network(corp: &CorpNetworkConfig) -> Result<(), ConfigError> {
+    if !corp.enabled {
+        return Ok(());
+    }
+    let has_suffix = corp.dns_suffixes.iter().any(|s| !s.trim().is_empty());
+    if !has_suffix {
+        return Err(ConfigError::CorpNetwork {
+            reason: "enabled requires at least one non-empty dnsSuffixes entry",
+        });
+    }
+    if corp.poll_seconds == 0 {
+        return Err(ConfigError::CorpNetwork {
+            reason: "pollSeconds must be greater than zero",
+        });
+    }
+    Ok(())
 }
 
 fn check_port(field: &'static str, port: u16) -> Result<(), ConfigError> {

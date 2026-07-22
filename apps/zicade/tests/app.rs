@@ -17,7 +17,7 @@ use zicade::{App, build_routing};
 use zicade_config::{
     AuthConfig, AuthMode, Config, ListenConfig, RoutingConfig, RoutingMode, UpstreamConfig,
 };
-use zicade_observe::channel_layer;
+use zicade_observe::{LogStore, channel_layer};
 use zicade_proxy::Routing;
 
 /// A unique temp config path per call (no external tempfile crate).
@@ -56,6 +56,26 @@ async fn free_port_pair() -> u16 {
     }
 }
 
+/// Start a direct-mode [`App`] on a free loopback port pair, returning the app
+/// and its chosen proxy port.
+///
+/// [`free_port_pair`] can only *probe* a free port then release it; between that
+/// release and [`App::start`] rebinding it, a parallel test can grab the port
+/// (ephemeral `:0` allocation favors just-freed ports), surfacing as a bind
+/// error. That race is benign, so we simply retry on a fresh pair rather than
+/// letting the suite flake.
+async fn start_direct_app(logs: LogStore) -> (App, u16) {
+    for _ in 0..50 {
+        let port = free_port_pair().await;
+        match App::start(direct_config(port), temp_config_path(), logs.clone()).await {
+            Ok(app) => return (app, port),
+            // Port taken between probe and bind: try another pair.
+            Err(_) => continue,
+        }
+    }
+    panic!("could not start the app on a free loopback port pair after 50 attempts");
+}
+
 async fn wait_connectable(addr: SocketAddr) {
     for _ in 0..100 {
         if TcpStream::connect(addr).await.is_ok() {
@@ -69,10 +89,7 @@ async fn wait_connectable(addr: SocketAddr) {
 #[tokio::test]
 async fn starts_and_shuts_down_gracefully() {
     let (_layer, logs) = channel_layer(64);
-    let port = free_port_pair().await;
-    let app = App::start(direct_config(port), temp_config_path(), logs)
-        .await
-        .expect("app should start in direct mode");
+    let (app, port) = start_direct_app(logs).await;
 
     let proxy_addr = app.proxy_addr();
     let web_addr = app.web_addr();
@@ -102,10 +119,7 @@ async fn shuts_down_even_with_an_open_sse_stream() {
     // zombie process. The shutdown signal now ends the SSE stream, so `run`
     // returns even while a client is still connected.
     let (_layer, logs) = channel_layer(64);
-    let port = free_port_pair().await;
-    let app = App::start(direct_config(port), temp_config_path(), logs)
-        .await
-        .expect("app should start in direct mode");
+    let (app, _port) = start_direct_app(logs).await;
     let web_addr = app.web_addr();
 
     let (tx, rx) = oneshot::channel::<()>();
@@ -148,6 +162,7 @@ async fn invalid_config_fails_fast() {
             mode: RoutingMode::Upstream,
             upstream: None,
             pac: None,
+            corp_network: None,
         },
         ..Default::default()
     };
@@ -199,6 +214,7 @@ fn build_routing_maps_direct_and_upstream() {
                 },
             }),
             pac: None,
+            corp_network: None,
         },
         ..Default::default()
     };

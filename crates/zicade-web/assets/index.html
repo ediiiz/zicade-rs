@@ -162,6 +162,32 @@
                 </select>
               </label>
             </fieldset>
+
+            <fieldset class="section-corp" hidden>
+              <legend>Corporate-network detection</legend>
+              <label>
+                <input data-field="corpNetwork.enabled" name="corpNetwork.enabled"
+                       type="checkbox" role="switch" />
+                Only use this routing on the corporate network (else go direct)
+              </label>
+              <small class="muted">
+                Detects the corporate network by matching an active adapter's DNS
+                suffix. Off-network the proxy routes direct, so it keeps working
+                when you disconnect from corp.
+              </small>
+              <div class="grid-2">
+                <label>Corporate DNS suffixes
+                  <textarea data-field="corpNetwork.dnsSuffixes"
+                            name="corpNetwork.dnsSuffixes" rows="2"
+                            placeholder="droot.org"></textarea>
+                  <small class="muted">One per line (or comma-separated).</small>
+                </label>
+                <label>Re-check interval (seconds)
+                  <input data-field="corpNetwork.pollSeconds" name="corpNetwork.pollSeconds"
+                         type="number" min="1" placeholder="30" />
+                </label>
+              </div>
+            </fieldset>
           </fieldset>
 
           <fieldset>
@@ -213,6 +239,7 @@
         </header>
         <div class="stats">
           <div class="stat"><span class="stat-label">Routing</span><span class="stat-value" id="st-mode">—</span></div>
+          <div class="stat" id="st-corp-box" hidden><span class="stat-label">Corp network</span><span class="stat-value" id="st-corp">—</span></div>
           <div class="stat"><span class="stat-label">Listen</span><span class="stat-value" id="st-listen">—</span></div>
           <div class="stat"><span class="stat-label">Requests</span><span class="stat-value" id="st-total">—</span></div>
           <div class="stat"><span class="stat-label">Failed</span><span class="stat-value" id="st-failed">—</span></div>

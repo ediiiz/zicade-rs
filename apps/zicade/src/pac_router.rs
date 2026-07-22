@@ -178,6 +178,7 @@ mod tests {
             mode: RoutingMode::Pac,
             upstream: None,
             pac: Some(pac),
+            corp_network: None,
         }
     }
 

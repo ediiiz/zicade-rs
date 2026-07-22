@@ -66,6 +66,7 @@ fn upstream_negotiate_config() -> Config {
                 },
             }),
             pac: None,
+            corp_network: None,
         },
         ..Default::default()
     }

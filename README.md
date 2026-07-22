@@ -163,6 +163,11 @@ The tray icon's right-click menu has exactly two items:
       "path": null, "url": null,
       "failPolicy": "error",           // "error" | "direct"
       "auth": { "mode": "negotiate" }  // inherited by PAC-selected upstreams
+    },
+    "corpNetwork": {                   // optional; gates pac/upstream on the corp network
+      "enabled": true,
+      "dnsSuffixes": ["droot.org"],    // required when enabled; matched dot-boundary, case-insensitive
+      "pollSeconds": 30                // re-check fallback interval (default 30)
     }
   },
   "logging": { "level": "info", "format": "json" }
@@ -171,7 +176,31 @@ The tray icon's right-click menu has exactly two items:
 
 Validation runs at startup and **fails fast** with a clear message: ports must
 be non-zero, `upstream`/`pac` sections are required for their modes, `basic` auth
-requires a username, and `negotiate` auth is only accepted on Windows.
+requires a username, `negotiate` auth is only accepted on Windows, and an enabled
+`corpNetwork` requires a non-empty `dnsSuffixes` and a non-zero `pollSeconds`.
+
+#### Corporate-network detection (`routing.corpNetwork`)
+
+Optional and **disabled by default** (absent = off; older configs are
+unaffected). When enabled with `mode = "pac"` or `"upstream"`, a background
+monitor decides whether the machine is on the corporate network by matching the
+active adapters' connection-specific DNS suffixes against `dnsSuffixes`
+(case-insensitive, on a dot boundary — `dy.droot.org` matches `droot.org`):
+
+- **On the corporate network** → the configured routing (PAC/upstream) applies.
+- **Off it** → the proxy routes **direct**, so it keeps working when you
+  disconnect from corp instead of failing every request against an unreachable
+  gateway/PAC.
+
+Detection is event-driven (it reacts to Windows address-change notifications)
+with `pollSeconds` as a re-check fallback. The on-corp routing is rebuilt on each
+reconnect, so `source = "auto"` re-reads the system PAC after you rejoin the
+network (even if the app started off-corp). The web status panel shows the
+current **on-corp** state, and routing swaps live with no restart. Off-Windows,
+or if adapter enumeration fails, detection is unavailable and the configured
+routing applies unchanged (the feature is purely additive). Enabling the gate
+from the UI when it was off at startup requires a restart; changing suffixes or
+toggling it while it is already running takes effect immediately.
 
 ## Web UI
 
@@ -179,13 +208,15 @@ requires a username, and `negotiate` auth is only accepted on Windows.
 - A clean, theme-aware control panel (vendored [Pico CSS] v2.1.1, embedded and
   served same-origin — **no external CDN**, so it works fully offline). The form
   exposes **every** config field (listen, routing mode, upstream + its auth, PAC
-  + its auth, logging, and the web-auth toggle); the upstream/PAC subsections
-  show or hide based on the selected routing mode. Edits are serialized back to
+  + its auth, corporate-network detection, logging, and the web-auth toggle); the
+  upstream/PAC/corp-network subsections show or hide based on the selected routing
+  mode. Edits are serialized back to
   the same JSON schema the backend validates, so invalid input returns a `4xx`
   shown inline.
 - **Read-only** endpoints (`GET /api/config`, `GET /api/status`,
   `GET /events/logs` SSE) are open on loopback.
-- A **live status panel** shows the active routing mode, listen address, total
+- A **live status panel** shows the active routing mode, the corporate-network
+  on-corp state (when the gate is enabled), listen address, total
   and failed request counts, active connections, and current in/out throughput
   with a 60-second inline-SVG sparkline. It is driven by a `GET /events/metrics`
   SSE stream (one `StatusSnapshot` per second; the client derives byte/s from the
