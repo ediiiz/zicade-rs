@@ -77,6 +77,35 @@ fn ring_is_bounded_and_keeps_newest() {
 }
 
 #[test]
+fn push_assigns_monotonic_seq() {
+    let store = with_layer(8, || {
+        tracing::info!("first");
+        tracing::info!("second");
+    });
+    let events = store.recent();
+    assert_eq!(events[0].seq, 1, "seq is 1-based");
+    assert_eq!(events[1].seq, 2, "seq increments per push");
+}
+
+#[test]
+fn ring_and_broadcast_carry_the_same_seq() {
+    let (layer, store) = channel_layer(8);
+    let mut rx = store.subscribe();
+    let subscriber = tracing_subscriber::registry().with(layer);
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::info!("stamped");
+    });
+
+    let live = rx.try_recv().expect("broadcast event");
+    let buffered = &store.recent()[0];
+    assert_eq!(
+        live.seq, buffered.seq,
+        "the SSE dedup relies on ring and broadcast sharing one identity"
+    );
+    assert!(live.seq > 0, "stored events must carry an assigned seq");
+}
+
+#[test]
 fn log_event_serializes_to_json() {
     let store = with_layer(4, || {
         tracing::info!(key = "value", "hello");

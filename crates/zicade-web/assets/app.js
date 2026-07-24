@@ -223,6 +223,8 @@ function startMetrics() {
   es.onerror = () => setOnline(false);
 }
 
+const MAX_LOG_LINES = 2000;
+
 function startLogs() {
   const box = $("#logs");
   const es = new EventSource("/events/logs");
@@ -231,12 +233,18 @@ function startLogs() {
     try {
       const ev = JSON.parse(e.data);
       level = ev.level || "";
-      line = `[${ev.level}] ${ev.target}: ${ev.message}`;
+      const ts = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : "";
+      const fields = ev.fields
+        ? Object.entries(ev.fields).map(([k, v]) => `${k}=${v}`).join(" ")
+        : "";
+      line = `${ts ? ts + " " : ""}[${ev.level}] ${ev.target}: ${ev.message}` +
+        (fields ? " " + fields : "");
     } catch (_) {}
     const div = document.createElement("div");
     div.textContent = line;
     if (level) div.className = "lvl-" + level;
     box.appendChild(div);
+    while (box.childElementCount > MAX_LOG_LINES) box.removeChild(box.firstChild);
     box.scrollTop = box.scrollHeight;
   };
 }
