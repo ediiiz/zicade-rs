@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.3](https://github.com/ediiiz/zicade-rs/compare/v0.3.2...v0.3.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* **pac:** stop head-of-line blocking from wedged WinHTTP resolves ([dda999c](https://github.com/ediiiz/zicade-rs/commit/dda999cc4be47990b31bc24c2d2a5dab9ad4662f))
+* **proxy:** instrument CONNECT tunnels, bound handshake and stalled writes ([ccc56fc](https://github.com/ediiiz/zicade-rs/commit/ccc56fc31e39bb89f32bf64ed5dc66903c54ed55))
+* **web:** replay buffered logs and render fields in the live log panel ([e824c20](https://github.com/ediiiz/zicade-rs/commit/e824c209051f807b40e8568965fc6d5745bf7a95))
+
 ## [0.3.2](https://github.com/ediiiz/zicade-rs/compare/v0.3.1...v0.3.2) (2026-07-22)
 
 
