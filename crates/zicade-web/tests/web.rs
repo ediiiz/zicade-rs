@@ -232,6 +232,56 @@ async fn sse_logs_endpoint_streams() {
     assert!(ct.starts_with("text/event-stream"), "content-type was {ct}");
 }
 
+/// Events logged BEFORE the UI connects must be replayed to a fresh SSE
+/// subscriber (parity with the console, which saw them live), fields included.
+#[tokio::test]
+async fn sse_logs_replays_buffered_backlog() {
+    let cfg = Config::default();
+    let path = temp_config_path();
+    zicade_config::save_file(&path, &cfg).expect("seed config file");
+    let (_layer, logs) = channel_layer(64);
+    logs.push(zicade_observe::LogEvent {
+        seq: 0, // the store assigns the real seq on push
+        timestamp: 1_700_000_000_000,
+        level: "INFO".to_owned(),
+        target: "test".to_owned(),
+        message: "buffered before the UI connected".to_owned(),
+        fields: std::collections::BTreeMap::from([("answer".to_owned(), "42".to_owned())]),
+    });
+    let state = AppState::new(cfg, path, TOKEN.to_owned(), logs);
+    let app = router(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/events/logs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The stream never ends (no shutdown signal attached), so read only the
+    // first frame — it must be the replayed backlog event.
+    let mut body = resp.into_body();
+    let frame = body
+        .frame()
+        .await
+        .expect("a first frame must arrive immediately")
+        .expect("frame reads cleanly");
+    let bytes = frame.into_data().expect("data frame");
+    let text = String::from_utf8(bytes.to_vec()).expect("utf8 frame");
+    assert!(
+        text.contains("buffered before the UI connected"),
+        "backlog must be replayed first, got: {text}"
+    );
+    assert!(
+        text.contains("\"answer\":\"42\""),
+        "structured fields must survive the replay, got: {text}"
+    );
+}
+
 #[tokio::test]
 async fn get_index_serves_html() {
     let state = state_with_config(Config::default());

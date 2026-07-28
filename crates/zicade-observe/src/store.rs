@@ -1,6 +1,7 @@
 //! The bounded in-memory ring buffer plus broadcast fan-out.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
@@ -23,6 +24,8 @@ struct Inner {
     ring: Mutex<VecDeque<LogEvent>>,
     cap: usize,
     tx: broadcast::Sender<LogEvent>,
+    /// Source of the per-event `seq` (see [`LogEvent::seq`]); 1-based.
+    seq: AtomicU64,
 }
 
 impl LogStore {
@@ -35,13 +38,17 @@ impl LogStore {
                 ring: Mutex::new(VecDeque::with_capacity(cap)),
                 cap,
                 tx,
+                seq: AtomicU64::new(0),
             }),
         }
     }
 
     /// Append an event, evicting the oldest if the ring is full, then broadcast
     /// it to any live subscribers. A send error (no subscribers) is ignored.
-    pub fn push(&self, event: LogEvent) {
+    /// The store stamps the event's `seq` here, so ring and broadcast carry the
+    /// same identity for it.
+    pub fn push(&self, mut event: LogEvent) {
+        event.seq = self.inner.seq.fetch_add(1, Ordering::Relaxed) + 1;
         if let Ok(mut ring) = self.inner.ring.lock() {
             if ring.len() == self.inner.cap {
                 ring.pop_front();

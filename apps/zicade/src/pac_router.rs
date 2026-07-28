@@ -10,9 +10,11 @@
 //! over a channel. This keeps blocking WinHTTP calls off the async runtime
 //! without sharing the raw handle across threads.
 
+use std::collections::HashMap;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use tokio::sync::{mpsc, oneshot};
@@ -26,6 +28,19 @@ use crate::routing::build_auth;
 /// A resolve request: the target URL plus a one-shot channel for the result.
 type ResolveJob = (String, oneshot::Sender<Result<PacResult, RoutingError>>);
 type ResolverTx = mpsc::UnboundedSender<ResolveJob>;
+
+/// Upper bound on one PAC resolution round-trip. The resolver thread serves
+/// requests one at a time with a blocking WinHTTP call, so a single wedged
+/// resolve (WPAD discovery, PAC fetch) would otherwise head-of-line block EVERY
+/// request in the proxy indefinitely. On timeout, `failPolicy` governs.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a cached PAC decision stays valid per destination. Repeat traffic
+/// to the same host skips the single-threaded resolver entirely, so a slow or
+/// wedged WinHTTP call only affects destinations not seen recently. Routing
+/// rebuilds (config apply, corp-network transitions) discard the cache with the
+/// router closure.
+const CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// Build the PAC [`Routing`]: start the resolver thread and hand the proxy a
 /// closure that resolves each request through it.
@@ -44,11 +59,22 @@ pub(crate) fn build_pac(config: &Config) -> anyhow::Result<Routing> {
 
     let tx = spawn_resolver(pac.source, pac.url.clone(), pac.path.clone());
     let routing = Arc::new(config.routing.clone());
+    let cache = Arc::new(PacCache::new(CACHE_TTL));
     let router: PacRouter = Arc::new(move |url: String| {
         let tx = tx.clone();
         let routing = Arc::clone(&routing);
+        let cache = Arc::clone(&cache);
         Box::pin(async move {
-            let resolved = resolve_via_thread(&tx, url).await;
+            let resolved = match cache.get(&url) {
+                Some(decision) => Ok(decision),
+                None => {
+                    let resolved = resolve_via_thread(&tx, url.clone()).await;
+                    if let Ok(decision) = &resolved {
+                        cache.put(url, decision.clone());
+                    }
+                    resolved
+                }
+            };
             to_route_choice(resolved, &routing)
         })
     });
@@ -56,7 +82,9 @@ pub(crate) fn build_pac(config: &Config) -> anyhow::Result<Routing> {
 }
 
 /// Send one resolve request to the backend thread and await its reply. A dead
-/// or dropped channel is reported as a backend error so `failPolicy` decides.
+/// or dropped channel is reported as a backend error so `failPolicy` decides;
+/// so is a reply that does not arrive within [`RESOLVE_TIMEOUT`] (the resolver
+/// thread stays blocked in WinHTTP, but the proxy keeps answering).
 async fn resolve_via_thread(tx: &ResolverTx, url: String) -> Result<PacResult, RoutingError> {
     let (reply_tx, reply_rx) = oneshot::channel();
     if tx.send((url, reply_tx)).is_err() {
@@ -64,11 +92,53 @@ async fn resolve_via_thread(tx: &ResolverTx, url: String) -> Result<PacResult, R
             "PAC resolver thread stopped".to_owned(),
         ));
     }
-    reply_rx.await.unwrap_or_else(|_| {
-        Err(RoutingError::Backend(
-            "PAC resolver dropped the request".to_owned(),
-        ))
-    })
+    match tokio::time::timeout(RESOLVE_TIMEOUT, reply_rx).await {
+        Ok(reply) => reply.unwrap_or_else(|_| {
+            Err(RoutingError::Backend(
+                "PAC resolver dropped the request".to_owned(),
+            ))
+        }),
+        Err(_) => Err(RoutingError::Backend(format!(
+            "PAC resolution timed out after {}s (resolver busy or WinHTTP call wedged)",
+            RESOLVE_TIMEOUT.as_secs()
+        ))),
+    }
+}
+
+/// A TTL cache of successful PAC decisions keyed by target URL. Only `Ok`
+/// results are cached — errors always retry the resolver. Entries are capped so
+/// a scan of unique destinations cannot grow the map unbounded.
+struct PacCache {
+    ttl: Duration,
+    entries: Mutex<HashMap<String, (Instant, PacResult)>>,
+}
+
+/// Bound on cached destinations; the map is cleared when full (simpler than an
+/// LRU, and a full wipe just costs one resolver round-trip per destination).
+const CACHE_MAX_ENTRIES: usize = 4096;
+
+impl PacCache {
+    fn new(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get(&self, url: &str) -> Option<PacResult> {
+        let entries = self.entries.lock().ok()?;
+        let (stored_at, decision) = entries.get(url)?;
+        (stored_at.elapsed() < self.ttl).then(|| decision.clone())
+    }
+
+    fn put(&self, url: String, decision: PacResult) {
+        if let Ok(mut entries) = self.entries.lock() {
+            if entries.len() >= CACHE_MAX_ENTRIES {
+                entries.clear();
+            }
+            entries.insert(url, (Instant::now(), decision));
+        }
+    }
 }
 
 /// Spawn the dedicated thread that owns the WinHTTP backend and serves resolve
@@ -165,10 +235,27 @@ fn to_route_choice(
 
 #[cfg(test)]
 mod tests {
-    use super::to_route_choice;
+    use std::time::Duration;
+
+    use super::{PacCache, to_route_choice};
     use zicade_config::{AuthMode, FailPolicy, PacConfig, RoutingConfig, RoutingMode};
     use zicade_proxy::RouteChoice;
     use zicade_routing::{PacResult, RoutingError};
+
+    #[test]
+    fn cache_returns_fresh_entry() {
+        let cache = PacCache::new(Duration::from_secs(60));
+        cache.put("https://a:443".to_owned(), PacResult::Direct);
+        assert_eq!(cache.get("https://a:443"), Some(PacResult::Direct));
+    }
+
+    #[test]
+    fn cache_misses_unknown_and_expired_entries() {
+        let cache = PacCache::new(Duration::ZERO); // everything expires instantly
+        cache.put("https://a:443".to_owned(), PacResult::Direct);
+        assert_eq!(cache.get("https://a:443"), None, "expired entry must miss");
+        assert_eq!(cache.get("https://b:443"), None, "unknown entry must miss");
+    }
 
     fn routing_pac(fail: FailPolicy) -> RoutingConfig {
         let mut pac = PacConfig::default();

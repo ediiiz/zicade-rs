@@ -2,6 +2,9 @@
 //! `CONNECT` dispatch to the tunnel. Body framing is handled by hyper, so
 //! request/response bodies stream through byte-for-byte (LESSON-4).
 
+use std::net::SocketAddr;
+use std::time::Instant;
+
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty};
@@ -13,21 +16,43 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
 use crate::metrics::ProxyMetrics;
-use crate::tunnel;
+use crate::tunnel::{self, TunnelInfo};
 use crate::upstream::{self, PacRouter, RouteChoice, Routing, UpstreamTarget};
 
 pub(crate) type BoxedBody = BoxBody<Bytes, hyper::Error>;
 pub(crate) type ForwardError = Box<dyn std::error::Error + Send + Sync>;
 
+/// The client side of an accepted connection, threaded into the CONNECT
+/// handlers so tunnel logs can name both endpoints.
+#[derive(Clone, Copy)]
+struct ClientEndpoints {
+    remote: Option<SocketAddr>,
+    local: Option<SocketAddr>,
+}
+
 /// Serve a single accepted connection. The connection guard is held for the
 /// lifetime of the connection and released on drop (even on error/panic).
 pub(crate) async fn handle_connection(stream: TcpStream, metrics: ProxyMetrics, routing: Routing) {
     let _guard = metrics.connection_guard();
+    // Capture the client endpoints up front, before the socket is consumed by
+    // the upgrade, so tunnel logs can name both ends of the connection.
+    let client_remote = stream.peer_addr().ok();
+    let client_local = stream.local_addr().ok();
+    // Disable Nagle on the client side: zicade is a relay, and small writes
+    // (TLS records, request/response headers) must not wait on delayed ACKs, or
+    // the handshake/interactive phase stalls and clients time out and RST.
+    if let Err(err) = stream.set_nodelay(true) {
+        tracing::debug!(error = %err, "failed to set TCP_NODELAY on client socket");
+    }
     let io = TokioIo::new(stream);
     let service = service_fn(move |req| {
         let metrics = metrics.clone();
         let routing = routing.clone();
-        async move { Ok::<_, hyper::Error>(proxy_service(req, metrics, routing).await) }
+        async move {
+            Ok::<_, hyper::Error>(
+                proxy_service(req, metrics, routing, client_remote, client_local).await,
+            )
+        }
     });
 
     // Per-connection isolation: a connection-level error is logged and dropped;
@@ -42,12 +67,20 @@ async fn proxy_service(
     req: Request<Incoming>,
     metrics: ProxyMetrics,
     routing: Routing,
+    client_remote: Option<SocketAddr>,
+    client_local: Option<SocketAddr>,
 ) -> Response<BoxedBody> {
     if req.method() == Method::CONNECT {
+        let client = ClientEndpoints {
+            remote: client_remote,
+            local: client_local,
+        };
         return match &routing {
-            Routing::Direct => handle_connect(req, metrics),
-            Routing::Upstream(target) => handle_connect_upstream(req, target, metrics).await,
-            Routing::Pac(router) => handle_connect_pac(req, router, metrics).await,
+            Routing::Direct => handle_connect(req, metrics, client),
+            Routing::Upstream(target) => {
+                handle_connect_upstream(req, target, metrics, client).await
+            }
+            Routing::Pac(router) => handle_connect_pac(req, router, metrics, client).await,
         };
     }
     metrics.incr_request();
@@ -75,13 +108,20 @@ async fn handle_connect_pac(
     req: Request<Incoming>,
     router: &PacRouter,
     metrics: ProxyMetrics,
+    client: ClientEndpoints,
 ) -> Response<BoxedBody> {
     let Some(dst) = authority_target(req.uri()) else {
         return error_response(StatusCode::BAD_REQUEST);
     };
     match router(format!("https://{dst}")).await {
-        Ok(RouteChoice::Direct) => handle_connect(req, metrics),
-        Ok(RouteChoice::Upstream(target)) => handle_connect_upstream(req, &target, metrics).await,
+        Ok(RouteChoice::Direct) => {
+            tracing::debug!(dst, "PAC selected DIRECT for CONNECT");
+            handle_connect(req, metrics, client)
+        }
+        Ok(RouteChoice::Upstream(target)) => {
+            tracing::debug!(dst, upstream = %target.addr, "PAC selected upstream for CONNECT");
+            handle_connect_upstream(req, &target, metrics, client).await
+        }
         Err(err) => {
             tracing::warn!(error = %err, dst, "PAC resolution failed for CONNECT");
             error_response(StatusCode::BAD_GATEWAY)
@@ -111,23 +151,42 @@ async fn handle_connect_upstream(
     req: Request<Incoming>,
     target: &UpstreamTarget,
     metrics: ProxyMetrics,
+    client: ClientEndpoints,
 ) -> Response<BoxedBody> {
     let Some(dst) = authority_target(req.uri()) else {
         return error_response(StatusCode::BAD_REQUEST);
     };
+    tracing::info!(
+        client_remote = %fmt_addr(client.remote),
+        target = %dst,
+        upstream = %target.addr,
+        "connect request received"
+    );
+    let dial_start = Instant::now();
     let peer = match upstream::connect_via_upstream(&target.addr, &dst, &target.auth).await {
         Ok(peer) => peer,
         Err(err) => {
-            tracing::warn!(error = %err, dst, "upstream CONNECT failed");
+            tracing::warn!(error = %err, dst, upstream = %target.addr, "upstream CONNECT failed");
             return error_response(StatusCode::BAD_GATEWAY);
         }
+    };
+    tracing::info!(
+        client_remote = %fmt_addr(client.remote),
+        target = %dst,
+        upstream = %target.addr,
+        dial_ms = dial_start.elapsed().as_secs_f64() * 1000.0,
+        "CONNECT established (via upstream)"
+    );
+    let info = TunnelInfo {
+        client_remote: client.remote,
+        client_local: client.local,
+        target: dst,
+        upstream: Some(target.addr.clone()),
     };
     tokio::spawn(async move {
         match hyper::upgrade::on(req).await {
             Ok(upgraded) => {
-                if let Err(err) = tunnel::splice(upgraded, peer, &metrics).await {
-                    tracing::debug!(error = %err, dst, "upstream tunnel closed with error");
-                }
+                let _ = tunnel::splice(upgraded, peer, &metrics, info).await;
             }
             Err(err) => tracing::warn!(error = %err, "CONNECT upgrade failed"),
         }
@@ -137,16 +196,30 @@ async fn handle_connect_upstream(
 
 /// On `CONNECT host:port`, reply 200 and splice the upgraded connection to the
 /// origin (direct mode).
-fn handle_connect(req: Request<Incoming>, metrics: ProxyMetrics) -> Response<BoxedBody> {
+fn handle_connect(
+    req: Request<Incoming>,
+    metrics: ProxyMetrics,
+    client: ClientEndpoints,
+) -> Response<BoxedBody> {
     let Some(target) = authority_target(req.uri()) else {
         return error_response(StatusCode::BAD_REQUEST);
+    };
+    tracing::info!(
+        client_remote = %fmt_addr(client.remote),
+        target = %target,
+        upstream = "direct",
+        "connect request received"
+    );
+    let info = TunnelInfo {
+        client_remote: client.remote,
+        client_local: client.local,
+        target,
+        upstream: None,
     };
     tokio::spawn(async move {
         match hyper::upgrade::on(req).await {
             Ok(upgraded) => {
-                if let Err(err) = tunnel::tunnel(upgraded, &target, &metrics).await {
-                    tracing::debug!(error = %err, target, "tunnel closed with error");
-                }
+                let _ = tunnel::tunnel(upgraded, &metrics, info).await;
             }
             Err(err) => tracing::warn!(error = %err, "CONNECT upgrade failed"),
         }
@@ -154,10 +227,18 @@ fn handle_connect(req: Request<Incoming>, metrics: ProxyMetrics) -> Response<Box
     Response::new(empty_body())
 }
 
+/// Render an optional socket address for logging (`-` when unknown).
+fn fmt_addr(a: Option<SocketAddr>) -> String {
+    a.map(|a| a.to_string()).unwrap_or_else(|| "-".to_owned())
+}
+
 /// Forward a plain HTTP request to the origin and stream the response back.
 async fn forward_http(req: Request<Incoming>) -> Result<Response<BoxedBody>, ForwardError> {
     let target = authority_target(req.uri()).ok_or("request missing host authority")?;
     let stream = TcpStream::connect(&target).await?;
+    if let Err(err) = stream.set_nodelay(true) {
+        tracing::debug!(error = %err, "failed to set TCP_NODELAY on origin socket");
+    }
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
     tokio::spawn(async move {

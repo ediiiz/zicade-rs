@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 /// lifted out for convenience.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogEvent {
+    /// Monotonic per-store sequence number, assigned by [`crate::LogStore`] on
+    /// push (1-based; 0 = not yet stored). Lets the SSE endpoint replay the
+    /// ring buffer and then dedup it against the live broadcast stream.
+    #[serde(default)]
+    pub seq: u64,
     /// Unix timestamp in milliseconds.
     pub timestamp: u64,
     /// Uppercase level name, e.g. `"INFO"`.
@@ -34,6 +39,7 @@ impl LogEvent {
         fields: BTreeMap<String, String>,
     ) -> Self {
         Self {
+            seq: 0, // assigned by the store on push
             timestamp: unix_millis(),
             level,
             target,

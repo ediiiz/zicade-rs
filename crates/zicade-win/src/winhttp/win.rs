@@ -98,21 +98,32 @@ impl Session {
     }
 
     /// Resolve the proxy for `url` via `WinHttpGetProxyForUrl`.
+    ///
+    /// The two resolution modes are mutually exclusive (browser semantics): a
+    /// session opened with an explicit PAC URL resolves via that URL only, and
+    /// WPAD auto-detect runs only when no URL was configured. Combining them
+    /// made every resolve pay the WPAD DHCP/DNS discovery latency (seconds on
+    /// an unhappy network) even though strategy selection had already picked
+    /// the config URL.
     pub(super) fn resolve(&self, url: &str) -> Result<PacResult, RoutingError> {
         let url_w = wide(url);
 
         let mut options = WINHTTP_AUTOPROXY_OPTIONS {
-            dwFlags: WINHTTP_AUTOPROXY_AUTO_DETECT,
-            dwAutoDetectFlags: WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A,
-            // Let WinHTTP use the caller's credentials on a challenge so WPAD
-            // fetches behind auth still succeed.
+            // Let WinHTTP use the caller's credentials on a challenge so PAC/
+            // WPAD fetches behind auth still succeed.
             fAutoLogonIfChallenged: true.into(),
             ..Default::default()
         };
-        if let Some(cfg) = &self.config_url {
-            // Enable the explicit PAC URL in addition to auto-detect.
-            options.dwFlags |= WINHTTP_AUTOPROXY_CONFIG_URL;
-            options.lpszAutoConfigUrl = PCWSTR(cfg.as_ptr());
+        match &self.config_url {
+            Some(cfg) => {
+                options.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL;
+                options.lpszAutoConfigUrl = PCWSTR(cfg.as_ptr());
+            }
+            None => {
+                options.dwFlags = WINHTTP_AUTOPROXY_AUTO_DETECT;
+                options.dwAutoDetectFlags =
+                    WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A;
+            }
         }
 
         let mut info = WINHTTP_PROXY_INFO::default();
