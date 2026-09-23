@@ -10,6 +10,7 @@ name: release-please
 #      packages an Inno Setup installer, and attaches both to that release.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
 
