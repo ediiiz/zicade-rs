@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use zicade_config::{Config, RoutingMode, ValidationCtx};
 use zicade_observe::LogStore;
+use zicade_proxy::ConnectionSnapshot;
 
 use crate::error::ControlError;
 
@@ -21,6 +22,10 @@ pub trait MetricsSource: Send + Sync {
     fn bytes_in(&self) -> u64;
     /// Cumulative bytes streamed out to origins/upstreams (upload).
     fn bytes_out(&self) -> u64;
+    /// Open connections, then recently finished ones; newest first in each.
+    fn connections(&self) -> Vec<ConnectionSnapshot> {
+        Vec::new()
+    }
 }
 
 /// A side-effecting hook run when a validated config is applied live.
@@ -130,6 +135,14 @@ impl Control {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .without_secrets()
+    }
+
+    /// Every tracked connection: open ones first, then the recent history.
+    pub fn connections(&self) -> Vec<ConnectionSnapshot> {
+        self.metrics
+            .as_ref()
+            .map(|metrics| metrics.connections())
+            .unwrap_or_default()
     }
 
     /// The stored status with live counters and the on-corp state overlaid.

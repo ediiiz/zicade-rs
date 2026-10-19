@@ -8,7 +8,7 @@ use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex};
 use gpui_kit::*;
 use zicade_control::{Control, StatusSnapshot};
 
-use crate::throughput::{Throughput, format_bytes_per_sec, format_count};
+use crate::throughput::{Throughput, format_bytes, format_bytes_per_sec, format_count};
 
 /// Seconds of throughput history the chart shows.
 const HISTORY_SECONDS: usize = 60;
@@ -156,8 +156,22 @@ impl Render for StatusView {
             ))
             .child(stat(
                 "stat-active",
-                "Active connections",
+                "Client connections",
                 format_count(s.active_connections as u64),
+                theme.foreground,
+                cx,
+            ))
+            .child(stat(
+                "stat-downloaded",
+                "Received",
+                format_bytes(s.bytes_in),
+                theme.foreground,
+                cx,
+            ))
+            .child(stat(
+                "stat-uploaded",
+                "Sent",
+                format_bytes(s.bytes_out),
                 theme.foreground,
                 cx,
             ))

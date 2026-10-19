@@ -38,6 +38,10 @@ impl MetricsSource for ProxyMetricsSource {
     fn bytes_out(&self) -> u64 {
         self.0.bytes_out()
     }
+
+    fn connections(&self) -> Vec<zicade_control::ConnectionSnapshot> {
+        self.0.connections()
+    }
 }
 
 /// A started application with its listener bound and ready to serve.

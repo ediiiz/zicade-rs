@@ -18,7 +18,7 @@ use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::metrics::ProxyMetrics;
+use crate::tracker::Tracked;
 
 /// Per-direction copy buffer. Larger than tokio's 8 KiB default so large
 /// uploads/downloads move in fewer syscalls.
@@ -59,7 +59,7 @@ pub(crate) struct TunnelInfo {
 /// Direct mode: connect straight to `info.target`, then splice.
 pub(crate) async fn tunnel(
     upgraded: Upgraded,
-    metrics: &ProxyMetrics,
+    tracked: &Tracked,
     info: TunnelInfo,
 ) -> io::Result<()> {
     let peer = match TcpStream::connect(&info.target).await {
@@ -76,15 +76,17 @@ pub(crate) async fn tunnel(
                 error = %err,
                 "tunnel origin connect failed"
             );
+            tracked.fail(format!("could not reach {}: {err}", info.target));
             return Err(err);
         }
     };
-    splice(upgraded, peer, metrics, info).await
+    splice(upgraded, peer, tracked, info).await
 }
 
 /// Splice bytes between the upgraded client connection and an already-connected
-/// `peer` (a direct origin, or an authenticated upstream tunnel), tallying the
-/// bytes into `metrics` and logging the tunnel's establishment and close.
+/// `peer` (a direct origin, or an authenticated upstream tunnel), counting the
+/// bytes against `tracked` as they move and logging the tunnel's establishment
+/// and close.
 #[allow(
     clippy::cognitive_complexity,
     reason = "lifecycle-log arms plus the close policy; splitting scatters teardown"
@@ -92,7 +94,7 @@ pub(crate) async fn tunnel(
 pub(crate) async fn splice(
     upgraded: Upgraded,
     peer: TcpStream,
-    metrics: &ProxyMetrics,
+    tracked: &Tracked,
     info: TunnelInfo,
 ) -> io::Result<()> {
     let upstream_remote = addr(peer.peer_addr().ok());
@@ -110,6 +112,7 @@ pub(crate) async fn splice(
         close_grace_secs = CLOSE_GRACE.as_secs(),
         "tunnel established"
     );
+    tracked.set_open();
 
     let client = TokioIo::new(upgraded);
     let (client_r, client_w) = tokio::io::split(client);
@@ -120,8 +123,22 @@ pub(crate) async fn splice(
     let u2c = AtomicU64::new(0); // upstream -> client (download)
     let start = Instant::now();
 
-    let up = pump(client_r, peer_w, &c2u, Direction::ClientToUpstream);
-    let down = pump(peer_r, client_w, &u2c, Direction::UpstreamToClient);
+    let count_up = |n| tracked.add_up(n);
+    let count_down = |n| tracked.add_down(n);
+    let up = pump(
+        client_r,
+        peer_w,
+        &c2u,
+        &count_up,
+        Direction::ClientToUpstream,
+    );
+    let down = pump(
+        peer_r,
+        client_w,
+        &u2c,
+        &count_down,
+        Direction::UpstreamToClient,
+    );
     tokio::pin!(up);
     tokio::pin!(down);
 
@@ -145,7 +162,6 @@ pub(crate) async fn splice(
 
     let bytes_c2u = c2u.load(Ordering::Relaxed);
     let bytes_u2c = u2c.load(Ordering::Relaxed);
-    metrics.add_bytes(bytes_u2c, bytes_c2u);
 
     let duration_ms = start.elapsed().as_millis() as u64;
     let bytes_total = bytes_c2u + bytes_u2c;
@@ -194,6 +210,11 @@ pub(crate) async fn splice(
                 error = %pe.err,
                 "tunnel closed with error"
             );
+            tracked.fail(format!(
+                "{} reset the tunnel: {}",
+                who_reset(dir, pe.op),
+                pe.err
+            ));
             Err(io::Error::new(pe.err.kind(), pe.err.to_string()))
         }
         None => {
@@ -298,12 +319,14 @@ struct PumpError {
     err: io::Error,
 }
 
-/// Copy one direction until EOF or error, keeping `counter` current as bytes are
-/// forwarded, and half-closing the write side on EOF so the peer sees the FIN.
+/// Copy one direction until EOF or error, keeping `counter` current and
+/// reporting each relayed chunk to `relayed` (the live throughput), and
+/// half-closing the write side on EOF so the peer sees the FIN.
 async fn pump<R, W>(
     mut r: R,
     mut w: W,
     counter: &AtomicU64,
+    relayed: &(dyn Fn(u64) + Sync),
     dir: Direction,
 ) -> Result<(), PumpError>
 where
@@ -336,6 +359,7 @@ where
                 });
             }
         }
+        relayed(n as u64);
         let total = counter.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
         tracing::trace!(
             direction = dir.as_str(),

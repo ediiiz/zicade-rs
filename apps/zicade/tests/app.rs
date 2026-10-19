@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
@@ -121,6 +122,63 @@ async fn control_reports_the_running_proxy() {
     assert_eq!(status.listen_addr, format!("127.0.0.1:{port}"));
     assert_eq!(status.routing_mode, "direct");
     assert_eq!(status.requests_total, 0);
+}
+
+#[tokio::test]
+async fn control_lists_live_connections_through_the_running_proxy() {
+    // The Connections page reads this; it must see a tunnel while it is open,
+    // with its bytes counted as they move.
+    let echo = TcpListener::bind("127.0.0.1:0").await.expect("bind echo");
+    let echo_addr = echo.local_addr().expect("echo addr");
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = echo.accept().await {
+            let (mut r, mut w) = socket.split();
+            let _ = tokio::io::copy(&mut r, &mut w).await;
+        }
+    });
+    let (_layer, logs) = channel_layer(64);
+    let (app, _port) = start_direct_app(logs).await;
+    let control = app.control();
+    let proxy_addr = app.proxy_addr();
+    let (tx, rx) = oneshot::channel::<()>();
+    let handle = tokio::spawn(app.run(async move {
+        let _ = rx.await;
+    }));
+
+    let mut tunnel = TcpStream::connect(proxy_addr).await.expect("connect proxy");
+    let connect = format!(
+        "CONNECT {echo_addr} HTTP/1.1
+Host: {echo_addr}
+
+"
+    );
+    tunnel
+        .write_all(connect.as_bytes())
+        .await
+        .expect("send CONNECT");
+    let mut head = [0u8; 64];
+    let n = tunnel.read(&mut head).await.expect("CONNECT reply");
+    assert!(String::from_utf8_lossy(&head[..n]).starts_with("HTTP/1.1 200"));
+    tunnel.write_all(b"ping").await.expect("write");
+    let mut back = [0u8; 4];
+    tunnel.read_exact(&mut back).await.expect("echo");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let open = loop {
+        let connections = control.connections();
+        if let Some(c) = connections.iter().find(|c| c.bytes_down == 4) {
+            break c.clone();
+        }
+        assert!(std::time::Instant::now() < deadline, "{connections:#?}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(open.target, echo_addr.to_string());
+    assert_eq!(open.state, zicade_control::ConnectionState::Open);
+    assert_eq!(control.status().requests_total, 1);
+
+    drop(tunnel);
+    tx.send(()).expect("send shutdown");
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
 }
 
 #[tokio::test]

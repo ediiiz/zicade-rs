@@ -12,3 +12,4 @@ mod error;
 
 pub use control::{ConfigApplyHook, Control, MetricsSource, OnCorpCell, StatusSnapshot};
 pub use error::ControlError;
+pub use zicade_proxy::{ConnectionKind, ConnectionSnapshot, ConnectionState};

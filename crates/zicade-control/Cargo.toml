@@ -9,6 +9,7 @@ rust-version.workspace = true
 thiserror = { workspace = true }
 zicade-config = { path = "../zicade-config" }
 zicade-observe = { path = "../zicade-observe" }
+zicade-proxy = { path = "../zicade-proxy" }
 
 [lints]
 workspace = true

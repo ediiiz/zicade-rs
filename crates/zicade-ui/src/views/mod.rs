@@ -1,6 +1,7 @@
 //! The window's content: a header with the page tabs, and the selected page.
 
 mod config;
+mod connections;
 mod logs;
 mod status;
 
@@ -11,11 +12,12 @@ use gpui_kit::*;
 use zicade_control::Control;
 
 use self::config::ConfigView;
+use self::connections::ConnectionsView;
 use self::logs::LogsView;
 use self::status::StatusView;
 
 /// The pages, in tab order.
-const PAGES: [&str; 3] = ["Status", "Configuration", "Logs"];
+const PAGES: [&str; 4] = ["Status", "Configuration", "Logs", "Connections"];
 
 enum Body {
     /// The proxy failed to start; there is nothing to show but why.
@@ -24,11 +26,12 @@ enum Body {
         status: Entity<StatusView>,
         config: Entity<ConfigView>,
         logs: Entity<LogsView>,
+        connections: Entity<ConnectionsView>,
     },
 }
 
-/// The window's root view: page tabs over status, configuration, and logs,
-/// or the reason the proxy failed to start.
+/// The window's root view: page tabs over status, configuration, logs, and
+/// connections, or the reason the proxy failed to start.
 pub struct MainView {
     page: usize,
     body: Body,
@@ -50,6 +53,7 @@ impl MainView {
                 status: cx.new(|cx| StatusView::new(control.clone(), cx)),
                 config: cx.new(|cx| ConfigView::new(control.clone(), window, cx)),
                 logs: cx.new(|cx| LogsView::new(control.logs(), cx)),
+                connections: cx.new(|cx| ConnectionsView::new(control.clone(), cx)),
             },
             Err(reason) => Body::Failed(reason.into()),
         };
@@ -91,10 +95,12 @@ impl Render for MainView {
                 status,
                 config,
                 logs,
+                connections,
             } => match self.page {
                 0 => status.clone().into_any_element(),
                 1 => config.clone().into_any_element(),
-                _ => logs.clone().into_any_element(),
+                2 => logs.clone().into_any_element(),
+                _ => connections.clone().into_any_element(),
             },
         };
         v_flex()

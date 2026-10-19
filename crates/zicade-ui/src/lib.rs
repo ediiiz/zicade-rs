@@ -8,6 +8,7 @@
 //! on [`UiCommand::Show`]; closing it leaves the app (and the proxy) running.
 
 pub mod choices;
+pub mod connection_rates;
 pub mod form_model;
 pub mod log_buffer;
 mod shell;

@@ -235,7 +235,7 @@ fn connect_request(target: &str, auth_header: Option<&str>) -> String {
 /// streams to the client while the connection task finishes in the background.
 pub(crate) async fn forward_via_upstream(
     upstream_addr: &str,
-    req: Request<Incoming>,
+    req: Request<BoxedBody>,
     auth: &UpstreamAuth,
 ) -> Result<Response<BoxedBody>, ForwardError> {
     let (parts, body) = req.into_parts();

@@ -78,3 +78,20 @@ pub fn format_count(n: u64) -> String {
     }
     out
 }
+
+/// `1536` -> `"1.5 KB"`: binary units, one decimal below ten.
+pub fn format_bytes(bytes: u64) -> String {
+    format_bytes_per_sec(bytes as f64)
+        .trim_end_matches("/s")
+        .to_owned()
+}
+
+/// `125s` -> `"2m 05s"`, `3725s` -> `"1h 02m"`.
+pub fn format_duration(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    match (secs / 3600, secs / 60 % 60, secs % 60) {
+        (0, 0, s) => format!("{s}s"),
+        (0, m, s) => format!("{m}m {s:02}s"),
+        (h, m, _) => format!("{h}h {m:02}m"),
+    }
+}

@@ -6,6 +6,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
+use crate::tracker::{ConnectionSnapshot, Tracker};
+
 /// Cloneable handle to the proxy's live counters.
 #[derive(Clone, Default, Debug)]
 pub struct ProxyMetrics {
@@ -14,6 +16,7 @@ pub struct ProxyMetrics {
     failed_requests: Arc<AtomicU64>,
     bytes_in: Arc<AtomicU64>,
     bytes_out: Arc<AtomicU64>,
+    tracker: Tracker,
 }
 
 impl ProxyMetrics {
@@ -22,12 +25,23 @@ impl ProxyMetrics {
         self.active.load(Ordering::Relaxed)
     }
 
-    /// Total HTTP requests forwarded since start.
+    /// Every tracked connection: open ones first, then the recent history,
+    /// newest first in each.
+    pub fn connections(&self) -> Vec<ConnectionSnapshot> {
+        self.tracker.snapshot()
+    }
+
+    pub(crate) fn tracker(&self) -> &Tracker {
+        &self.tracker
+    }
+
+    /// Total requests since start: plain-HTTP requests and `CONNECT` tunnels.
     pub fn total_requests(&self) -> u64 {
         self.total_requests.load(Ordering::Relaxed)
     }
 
-    /// Total forwarded requests that failed (produced a `502`/error) since start.
+    /// Requests and tunnels that failed (a `502`, a refused dial, a reset
+    /// tunnel) since start.
     pub fn failed_requests(&self) -> u64 {
         self.failed_requests.load(Ordering::Relaxed)
     }
@@ -50,7 +64,7 @@ impl ProxyMetrics {
         self.bytes_out.load(Ordering::Relaxed)
     }
 
-    /// Add tunneled byte counts (see [`Self::bytes_in`]/[`Self::bytes_out`]).
+    /// Add relayed byte counts (see [`Self::bytes_in`]/[`Self::bytes_out`]).
     pub(crate) fn add_bytes(&self, inbound: u64, outbound: u64) {
         if inbound > 0 {
             self.bytes_in.fetch_add(inbound, Ordering::Relaxed);

@@ -1,104 +1,14 @@
-//! The real window, driven headlessly: real views over a real [`Control`]
+//! The real window, driven headlessly: real views over a real `Control`
 //! with a config file on disk, operated through hit-tested clicks and typed
 //! text. No OS input is synthesized, so nothing reaches other applications.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+mod common;
 
+use common::{WAIT, fixture, label, log, open};
 use gpui_kit::test::{TestAppContextExt, TestWindowExt};
-use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, ElementId, Point, TestAppContext, Window, WindowBounds,
-    WindowOptions, init, open_window, px, size,
-};
-use zicade_config::{Config, ListenConfig, RoutingMode, load_file};
-use zicade_control::{ConfigApplyHook, Control, StatusSnapshot};
-use zicade_observe::{LogEvent, LogStore, channel_layer};
-use zicade_ui::{MainView, MainWindow, UiCommand, follow_tray};
-
-const WAIT: Duration = Duration::from_secs(5);
-
-fn temp_config_path() -> PathBuf {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("zicade-ui-window-{nanos}-{n}"));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.join("config.json")
-}
-
-struct Fixture {
-    control: Control,
-    path: PathBuf,
-    logs: LogStore,
-    applied: Arc<Mutex<Option<Config>>>,
-}
-
-fn fixture() -> Fixture {
-    let config = Config {
-        listen: ListenConfig {
-            host: "127.0.0.1".to_owned(),
-            port: 3229,
-        },
-        ..Config::default()
-    };
-    let path = temp_config_path();
-    zicade_config::save_file(&path, &config).unwrap();
-    let (_layer, logs) = channel_layer(64);
-    let applied = Arc::new(Mutex::new(None));
-    let seen = Arc::clone(&applied);
-    let hook: ConfigApplyHook = Arc::new(move |c: &Config| *seen.lock().unwrap() = Some(c.clone()));
-    let control = Control::new(config, path.clone(), logs.clone()).with_apply_hook(hook);
-    control.set_status(StatusSnapshot {
-        routing_mode: "direct".to_owned(),
-        listen_addr: "127.0.0.1:3229".to_owned(),
-        ..StatusSnapshot::default()
-    });
-    Fixture {
-        control,
-        path,
-        logs,
-        applied,
-    }
-}
-
-fn log(seq: u64, message: &str) -> LogEvent {
-    LogEvent {
-        seq,
-        timestamp: 0,
-        level: "INFO".to_owned(),
-        target: "zicade".to_owned(),
-        message: message.to_owned(),
-        fields: Default::default(),
-    }
-}
-
-fn open(control: Result<Control, String>, cx: &mut TestAppContext) -> AnyWindowHandle {
-    cx.update(init);
-    cx.update(|cx| {
-        let bounds = Bounds {
-            origin: Point::default(),
-            size: size(px(980.), px(1400.)),
-        };
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            ..Default::default()
-        };
-        open_window(options, cx, |window, cx| {
-            cx.new(|cx| MainView::new(control, window, cx))
-        })
-        .unwrap()
-        .0
-    })
-}
-
-fn label(window: &Window, id: impl Into<ElementId>) -> Option<String> {
-    window.find(id).label().map(str::to_owned)
-}
+use gpui_kit::{AppContext, TestAppContext, init};
+use zicade_config::{RoutingMode, load_file};
+use zicade_ui::{MainWindow, UiCommand, follow_tray};
 
 #[gpui_kit::test]
 fn the_status_page_shows_the_running_proxy(cx: &mut TestAppContext) {
@@ -113,6 +23,7 @@ fn the_status_page_shows_the_running_proxy(cx: &mut TestAppContext) {
             Some("127.0.0.1:3229")
         );
         assert_eq!(label(window, "stat-requests").as_deref(), Some("0"));
+        assert_eq!(label(window, "stat-downloaded").as_deref(), Some("0 B"));
     })
     .unwrap();
 }
