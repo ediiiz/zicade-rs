@@ -3,6 +3,7 @@
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
+use axum::http::header::HOST;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
@@ -34,7 +35,39 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(assets::index))
         .route("/assets/{*path}", get(assets::asset))
         .merge(gated)
+        .layer(middleware::from_fn(loopback_host_only))
         .with_state(state)
+}
+
+/// Reject requests whose `Host` names anything but loopback.
+///
+/// Binding to `127.0.0.1` stops other machines, but not a web page in the
+/// user's browser: via DNS rebinding, `attacker.example` can resolve to
+/// `127.0.0.1` and then read this API as same-origin. The browser still sends
+/// `Host: attacker.example`, which is what this check catches. A request with
+/// no `Host` header cannot come from a browser and is let through.
+async fn loopback_host_only(req: Request, next: Next) -> Response {
+    let allowed = req
+        .headers()
+        .get(HOST)
+        .is_none_or(|value| value.to_str().is_ok_and(is_loopback_host));
+    if allowed {
+        next.run(req).await
+    } else {
+        StatusCode::FORBIDDEN.into_response()
+    }
+}
+
+/// Whether a `Host` header value (`name[:port]`) names a loopback host.
+fn is_loopback_host(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map_or(host, |(name, _)| name),
+    };
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 /// Gate mutating requests. When `web.authRequired` is `false` (the default) the

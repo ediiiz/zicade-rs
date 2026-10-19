@@ -3,8 +3,8 @@
 //! injected [`ValidationCtx`] rather than `cfg!(windows)`.
 
 use zicade_config::{
-    AuthMode, Config, ConfigError, FailPolicy, PacSource, RoutingMode, SspiPackage, ValidationCtx,
-    from_json_str, to_json_string,
+    AuthConfig, AuthMode, Config, ConfigError, FailPolicy, PacSource, RoutingMode, SspiPackage,
+    UpstreamConfig, ValidationCtx, from_json_str, to_json_string,
 };
 
 /// The full spec §5.3 example, as valid JSON (comments stripped).
@@ -313,4 +313,39 @@ fn pac_selected_upstream_inherits_pac_auth() {
         "PAC-selected upstream must inherit pac.auth"
     );
     assert_eq!(effective.auth.mode, AuthMode::Negotiate);
+}
+
+fn basic_upstream(user: &str, pass: Option<&str>) -> Config {
+    let mut cfg = Config::default();
+    cfg.routing.upstream = Some(UpstreamConfig {
+        host: "proxy.example".to_owned(),
+        port: 8080,
+        auth: AuthConfig {
+            mode: AuthMode::Basic,
+            username: Some(user.to_owned()),
+            password: pass.map(str::to_owned),
+            ..AuthConfig::default()
+        },
+    });
+    cfg
+}
+
+#[test]
+fn keep_secrets_from_does_not_carry_a_password_to_another_user() {
+    let saved = basic_upstream("alice", Some("alice-secret"));
+    let mut edited = basic_upstream("bob", None);
+    edited.keep_secrets_from(&saved);
+    assert_eq!(edited.routing.upstream.unwrap().auth.password, None);
+}
+
+#[test]
+fn without_secrets_then_keep_secrets_from_round_trips() {
+    let saved = basic_upstream("alice", Some("alice-secret"));
+    let mut edited = saved.without_secrets();
+    assert_eq!(
+        edited.routing.upstream.as_ref().unwrap().auth.password,
+        None
+    );
+    edited.keep_secrets_from(&saved);
+    assert_eq!(edited, saved);
 }

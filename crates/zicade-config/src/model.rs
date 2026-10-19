@@ -16,6 +16,38 @@ pub struct Config {
     pub web: WebConfig,
 }
 
+impl Config {
+    /// A copy safe to hand to the web UI: stored passwords are removed.
+    #[must_use]
+    pub fn without_secrets(&self) -> Config {
+        let mut cfg = self.clone();
+        for auth in cfg.auth_slots_mut() {
+            auth.password = None;
+        }
+        cfg
+    }
+
+    /// Fill in passwords an edit left out because the UI never saw them: a
+    /// slot that is still Basic for the same username keeps `saved`'s password.
+    /// A new password, a different username, or another auth mode wins.
+    pub fn keep_secrets_from(&mut self, saved: &Config) {
+        let saved_upstream = saved.routing.upstream.as_ref().map(|u| &u.auth);
+        let saved_pac = saved.routing.pac.as_ref().map(|p| &p.auth);
+        if let (Some(upstream), Some(old)) = (self.routing.upstream.as_mut(), saved_upstream) {
+            upstream.auth.keep_password_from(old);
+        }
+        if let (Some(pac), Some(old)) = (self.routing.pac.as_mut(), saved_pac) {
+            pac.auth.keep_password_from(old);
+        }
+    }
+
+    fn auth_slots_mut(&mut self) -> impl Iterator<Item = &mut AuthConfig> {
+        let upstream = self.routing.upstream.as_mut().map(|u| &mut u.auth);
+        let pac = self.routing.pac.as_mut().map(|p| &mut p.auth);
+        upstream.into_iter().chain(pac)
+    }
+}
+
 /// Loopback listen address for the proxy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListenConfig {
@@ -207,6 +239,18 @@ pub struct AuthConfig {
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+}
+
+impl AuthConfig {
+    fn keep_password_from(&mut self, saved: &AuthConfig) {
+        if self.password.is_none()
+            && self.mode == AuthMode::Basic
+            && saved.mode == AuthMode::Basic
+            && self.username == saved.username
+        {
+            self.password.clone_from(&saved.password);
+        }
+    }
 }
 
 /// Web UI / local API configuration.
