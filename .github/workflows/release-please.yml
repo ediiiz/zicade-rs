@@ -5,6 +5,9 @@ name: release-please
 #      that accumulates conventional-commit changes and bumps the version — it
 #      edits .release-please-manifest.json and, via the `x-release-please-version`
 #      annotation, the workspace version in Cargo.toml, and updates CHANGELOG.md.
+#      Cargo.lock is bumped in the same PR by a `toml` extra-file whose JSONPath
+#      selects every lock entry without a `source`, i.e. the workspace crates
+#      (see release-please-config.json).
 #   2. When that PR is merged, release-please tags the commit and creates the
 #      GitHub Release; the build job then compiles the Windows release .exe,
 #      packages an Inno Setup installer, and attaches both to that release.
@@ -32,34 +35,6 @@ jobs:
         id: rp
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      # release-please's "simple" release type bumps the version in Cargo.toml
-      # but never touches Cargo.lock, so the committed lock drifts. Reconcile it
-      # on the open release PR (labelled `autorelease: pending`) with
-      # `cargo update --workspace` — the command Cargo documents for syncing the
-      # lock after a version change; it only rewrites the workspace crates'
-      # entries, leaving external deps pinned. Runs on ubuntu (cargo preinstalled)
-      # and only writes Cargo.lock, so the pinned windows-gnu target in
-      # .cargo/config.toml is irrelevant (no compile/link happens).
-      - name: Sync Cargo.lock on the release PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          NUM=$(gh pr list --state open --label "autorelease: pending" --json number --jq '.[0].number // empty')
-          if [ -z "$NUM" ]; then
-            echo "No open release PR; nothing to sync."
-            exit 0
-          fi
-          gh pr checkout "$NUM"
-          cargo update --workspace
-          if git diff --quiet -- Cargo.lock; then
-            echo "Cargo.lock already in sync."
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "chore: sync Cargo.lock with release version" -- Cargo.lock
-            git push
-          fi
 
   build-windows-exe:
     needs: release-please
@@ -81,7 +56,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - name: Build release binary (MSVC)
         shell: bash
-        run: cargo build --release -p zicade --target x86_64-pc-windows-msvc --config "build.rustflags=[]"
+        run: cargo build --release --locked -p zicade --target x86_64-pc-windows-msvc --config "build.rustflags=[]"
       - name: Stage artifact
         shell: bash
         run: |

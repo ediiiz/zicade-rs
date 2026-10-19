@@ -15,7 +15,14 @@
   "packages": {
     ".": {
       "package-name": "zicade",
-      "extra-files": ["Cargo.toml"]
+      "extra-files": [
+        "Cargo.toml",
+        {
+          "type": "toml",
+          "path": "Cargo.lock",
+          "jsonpath": "$.package[?(!@.source)].version"
+        }
+      ]
     }
   }
 }

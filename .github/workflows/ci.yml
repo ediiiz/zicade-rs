@@ -60,7 +60,7 @@ jobs:
 
       - name: Test
         shell: bash
-        run: cargo test --workspace --target "$TARGET" --config "build.rustflags=[]"
+        run: cargo test --workspace --locked --target "$TARGET" --config "build.rustflags=[]"
 
       - name: Build binary (verifies the app-icon embed)
         shell: bash
