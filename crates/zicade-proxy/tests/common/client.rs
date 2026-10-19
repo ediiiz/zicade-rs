@@ -134,6 +134,12 @@ async fn read_response(stream: &mut TcpStream) -> HttpResponse {
             }
             body.extend_from_slice(&tmp[..n]);
         }
+        if headers
+            .get("transfer-encoding")
+            .is_some_and(|te| te.eq_ignore_ascii_case("chunked"))
+        {
+            body = dechunk(&body);
+        }
     }
     HttpResponse {
         status,
@@ -157,4 +163,22 @@ fn parse_status(status_line: &str) -> u16 {
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Decode a complete chunked body (the client always sends `Connection: close`,
+/// so the whole body has been read by the time this runs).
+fn dechunk(mut raw: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    while let Some(line_end) = find(raw, b"\r\n") {
+        let size_field = String::from_utf8_lossy(&raw[..line_end]);
+        let size_hex = size_field.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_hex, 16).expect("valid chunk size");
+        if size == 0 {
+            break;
+        }
+        let data = line_end + 2;
+        out.extend_from_slice(&raw[data..data + size]);
+        raw = &raw[data + size + 2..];
+    }
+    out
 }
