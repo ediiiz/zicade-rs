@@ -2,7 +2,7 @@
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -148,9 +148,7 @@ impl AppState {
 
     /// Replace the status snapshot.
     pub fn set_status(&self, status: StatusSnapshot) {
-        if let Ok(mut guard) = self.status.lock() {
-            *guard = status;
-        }
+        *self.status.lock().unwrap_or_else(PoisonError::into_inner) = status;
     }
 
     /// The configured UI token (mutation gate secret).
@@ -163,8 +161,9 @@ impl AppState {
     pub(crate) fn auth_required(&self) -> bool {
         self.config
             .lock()
-            .map(|c| c.web.auth_required)
-            .unwrap_or(false)
+            .unwrap_or_else(PoisonError::into_inner)
+            .web
+            .auth_required
     }
 
     /// The log store feeding the SSE stream.
@@ -190,7 +189,10 @@ impl AppState {
 
     /// A snapshot clone of the current in-memory config.
     pub(crate) fn config_snapshot(&self) -> Config {
-        self.config.lock().map(|c| c.clone()).unwrap_or_default()
+        self.config
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// A snapshot clone of the current status. If a live metrics source is
@@ -198,7 +200,11 @@ impl AppState {
     /// `active_connections`, and `requests_failed` (preserving `routing_mode`
     /// and `listen_addr`).
     pub(crate) fn status_snapshot(&self) -> StatusSnapshot {
-        let mut snapshot = self.status.lock().map(|s| s.clone()).unwrap_or_default();
+        let mut snapshot = self
+            .status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         if let Some(metrics) = &self.metrics {
             snapshot.requests_total = metrics.total_requests();
             snapshot.active_connections = metrics.active_connections();
@@ -207,7 +213,7 @@ impl AppState {
             snapshot.bytes_out = metrics.bytes_out();
         }
         if let Some(cell) = &self.on_corp {
-            snapshot.on_corp = cell.lock().ok().and_then(|c| *c);
+            snapshot.on_corp = *cell.lock().unwrap_or_else(PoisonError::into_inner);
         }
         snapshot
     }
@@ -222,12 +228,11 @@ impl AppState {
         if let Some(hook) = &self.apply_hook {
             hook(&config);
         }
-        if let Ok(mut status) = self.status.lock() {
-            status.routing_mode = routing_mode_label(config.routing.mode).to_owned();
-        }
-        if let Ok(mut guard) = self.config.lock() {
-            *guard = config;
-        }
+        self.status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .routing_mode = routing_mode_label(config.routing.mode).to_owned();
+        *self.config.lock().unwrap_or_else(PoisonError::into_inner) = config;
     }
 }
 

@@ -5,7 +5,7 @@
 //! the network changes. Detection and network-change waiting are injected so the
 //! decision logic is unit-testable off-Windows.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
@@ -153,16 +153,18 @@ impl NetworkGate {
     /// Evaluate once, synchronously — used at startup to set the correct initial
     /// routing before the proxy begins serving.
     pub(crate) fn evaluate_now(&self) {
-        if let Ok(mut g) = self.inner.lock() {
-            g.evaluate();
-        }
+        self.inner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .evaluate();
     }
 
     /// Adopt a new config (from the web config-apply hook), re-evaluating now.
     pub(crate) fn reconfigure(&self, config: Config) {
-        if let Ok(mut g) = self.inner.lock() {
-            g.reconfigure(config);
-        }
+        self.inner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .reconfigure(config);
     }
 
     /// Spawn the monitor thread: evaluate, then block until a network change or
@@ -173,14 +175,11 @@ impl NetworkGate {
             .name("zicade-netmon".to_owned())
             .spawn(move || {
                 while !*shutdown.borrow() {
-                    let poll = self
-                        .inner
-                        .lock()
-                        .map(|mut g| {
-                            g.evaluate();
-                            g.poll
-                        })
-                        .unwrap_or(Duration::from_secs(30));
+                    let poll = {
+                        let mut g = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+                        g.evaluate();
+                        g.poll
+                    };
                     zicade_win::wait_for_network_change(poll);
                 }
                 tracing::debug!("corp-network gate thread exiting on shutdown");
