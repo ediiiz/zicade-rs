@@ -78,41 +78,70 @@ fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
-/// Read the response body according to its framing (`Content-Length`, chunked,
-/// or empty). Used to consume a non-final response so the connection stays clean
-/// for the next handshake leg, and to buffer the final response.
-pub(crate) async fn read_body(
+/// Upper bound on a non-final (407/refusal) response body read between
+/// handshake legs. Proxy error pages are small; larger is treated as hostile.
+pub(crate) const MAX_DRAIN_BYTES: usize = 1024 * 1024;
+
+/// Read and discard a non-final response body according to its framing
+/// (`Content-Length`, chunked, or none), so the connection is positioned at the
+/// next response. Fails rather than read more than [`MAX_DRAIN_BYTES`]; the
+/// declared length is never trusted for allocation.
+pub(crate) async fn drain_body(
     stream: &mut TcpStream,
     headers: &[(String, String)],
-) -> io::Result<Vec<u8>> {
+) -> io::Result<()> {
     if let Some(len) = content_length(headers) {
-        let mut buf = vec![0u8; len];
-        stream.read_exact(&mut buf).await?;
-        Ok(buf)
+        discard(stream, len).await
     } else if is_chunked(headers) {
-        read_chunked(stream).await
+        drain_chunked(stream).await
     } else {
-        Ok(Vec::new())
+        Ok(())
     }
 }
 
-async fn read_chunked(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
-    let mut out = Vec::new();
+async fn drain_chunked(stream: &mut TcpStream) -> io::Result<()> {
+    let mut total = 0usize;
     loop {
         let line = read_line(stream).await?;
         let size_field = line.trim().split(';').next().unwrap_or("").trim();
         let size = usize::from_str_radix(size_field, 16)
             .map_err(|_| io::Error::other("invalid chunk size"))?;
         if size == 0 {
-            let _ = read_line(stream).await?; // trailing CRLF
-            break;
+            read_line(stream).await?; // trailing CRLF
+            return Ok(());
         }
-        let mut chunk = vec![0u8; size];
-        stream.read_exact(&mut chunk).await?;
-        out.extend_from_slice(&chunk);
-        let _ = read_line(stream).await?; // CRLF after the chunk data
+        total = total.saturating_add(size);
+        if total > MAX_DRAIN_BYTES {
+            return Err(too_large());
+        }
+        discard(stream, size).await?;
+        read_line(stream).await?; // CRLF after the chunk data
     }
-    Ok(out)
+}
+
+/// Read exactly `len` bytes and drop them, through a fixed-size buffer.
+async fn discard(stream: &mut TcpStream, len: usize) -> io::Result<()> {
+    if len > MAX_DRAIN_BYTES {
+        return Err(too_large());
+    }
+    const CHUNK: usize = 8192;
+    let mut buf = [0u8; CHUNK];
+    let mut left = len;
+    while left > 0 {
+        let n = stream.read(&mut buf[..left.min(CHUNK)]).await?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "upstream closed mid-body",
+            ));
+        }
+        left -= n;
+    }
+    Ok(())
+}
+
+fn too_large() -> io::Error {
+    io::Error::other("upstream non-final response body too large")
 }
 
 async fn read_line(stream: &mut TcpStream) -> io::Result<String> {

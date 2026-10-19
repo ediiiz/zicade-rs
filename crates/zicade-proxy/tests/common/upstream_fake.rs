@@ -246,6 +246,36 @@ pub async fn spawn_noauth_upstream() -> SocketAddr {
     addr
 }
 
+/// Spawn a no-auth fake upstream that answers one request with raw scripted
+/// bytes: it writes `first`, waits for `release`, writes `rest`, then closes.
+/// Lets tests hand the proxy arbitrary response framing and observe whether the
+/// proxy streams the response or waits for all of it. The receiver yields the
+/// request head the proxy sent.
+pub async fn spawn_scripted_upstream(
+    first: Vec<u8>,
+    rest: Vec<u8>,
+    release: Arc<tokio::sync::Notify>,
+) -> (SocketAddr, tokio::sync::oneshot::Receiver<String>) {
+    let (head_tx, head_rx) = tokio::sync::oneshot::channel();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let Ok((mut stream, _)) = listener.accept().await else {
+            return;
+        };
+        let Some((head, _)) = read_request(&mut stream).await else {
+            return;
+        };
+        let _ = head_tx.send(head);
+        if stream.write_all(&first).await.is_err() {
+            return;
+        }
+        release.notified().await;
+        let _ = stream.write_all(&rest).await;
+    });
+    (addr, head_rx)
+}
+
 async fn echo_tunnel(mut stream: TcpStream) {
     let mut buf = [0u8; 8192];
     loop {
