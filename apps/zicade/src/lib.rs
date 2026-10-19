@@ -5,9 +5,10 @@
 //! `main`; see [`init_tracing`]).
 //!
 //! [`App::start`] validates the config, maps it onto the proxy [`Routing`],
-//! and binds the proxy + web listeners on loopback. [`App::run`] serves both
-//! under one fan-out shutdown signal. The free [`run`] function is the
-//! start-then-serve convenience used by `main`.
+//! binds the proxy listener on loopback, and builds the UI's
+//! [`zicade_control::Control`] handle. [`App::run`] serves until the shutdown
+//! signal. The free [`run`] function is the start-then-serve convenience used
+//! by console mode.
 
 mod app;
 pub mod cli;
@@ -30,7 +31,7 @@ use zicade_observe::{ChannelLayer, LogStore};
 pub use app::App;
 pub use routing::build_routing;
 
-/// Capacity (events) of the in-memory log ring buffer feeding the UI SSE stream.
+/// Capacity (events) of the in-memory log ring buffer feeding the UI log view.
 pub const LOG_BUFFER_CAP: usize = 1024;
 
 /// A type-erased handle for live-reloading the tracing max level. Invoked with a
@@ -55,11 +56,7 @@ pub async fn run(
     shutdown: impl Future<Output = ()> + Send,
 ) -> anyhow::Result<()> {
     let app = App::start(config, config_path, logs, log_reload).await?;
-    tracing::info!(
-        proxy = %app.proxy_addr(),
-        web = %app.web_addr(),
-        "zicade started; open the web UI in a browser"
-    );
+    tracing::info!(proxy = %app.proxy_addr(), "zicade started");
     app.run(shutdown).await
 }
 

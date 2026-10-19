@@ -8,8 +8,8 @@
 //! The Win32 message pump is inherently single-threaded — window messages must
 //! be pumped on the thread that created the window, and the window/icon handles
 //! are `!Send`. So [`run_tray`] **owns its calling thread** until a menu handler
-//! returns [`TrayControl::Quit`]; the binary runs its tokio runtime (proxy +
-//! web) on a separate thread and signals shutdown from the `on_event` handler.
+//! returns [`TrayControl::Quit`]; the binary gives it a thread of its own, since
+//! the UI owns the main thread and the proxy runs on a tokio thread.
 
 use crate::WinError;
 
@@ -79,27 +79,14 @@ pub fn hide_console() -> Result<(), WinError> {
     }
 }
 
-/// Open `url` in the user's default browser (via `ShellExecuteW "open"`).
-///
-/// Off-Windows returns [`WinError::UnsupportedPlatform`].
-pub fn open_url(url: &str) -> Result<(), WinError> {
-    #[cfg(windows)]
-    {
-        win::open_url(url)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = url;
-        Err(WinError::UnsupportedPlatform)
-    }
-}
-
 /// Show a tray icon with the given `tooltip` and right-click `items`, then pump
 /// window messages on the calling thread until a menu handler returns
 /// [`TrayControl::Quit`].
 ///
-/// `on_event` is invoked with the [`TrayMenuItem::id`] of the clicked entry; it
-/// runs on this same thread, so it must not block for long. Off-Windows returns
+/// `on_event` is invoked with the [`TrayMenuItem::id`] of the clicked entry; a
+/// left-click on the icon reports the first item's id. It runs on this same
+/// thread, so it must not block for long. Any thread may run the tray, as long
+/// as it does nothing else. Off-Windows returns
 /// [`WinError::UnsupportedPlatform`].
 pub fn run_tray<F>(tooltip: &str, items: Vec<TrayMenuItem>, on_event: F) -> Result<(), WinError>
 where

@@ -1,4 +1,4 @@
-//! Windows FFI for the system tray, console hiding, and browser-open
+//! Windows FFI for the system tray and console hiding
 //! (`cfg(windows)` only). Every `unsafe` block carries a `// SAFETY:` note.
 //!
 //! The message pump is single-threaded: [`run_tray`] creates a hidden window on
@@ -16,16 +16,15 @@ use windows::Win32::System::Console::{FreeConsole, GetConsoleProcessList, GetCon
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
-    ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, HICON, IDI_APPLICATION,
     IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED, LoadIconW, LoadImageW, MF_STRING, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassW, SM_CXSMICON, SM_CYSMICON, SW_HIDE, SW_SHOWNORMAL,
-    SetForegroundWindow, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
-    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_NULL,
-    WM_RBUTTONUP, WNDCLASSW,
+    PostQuitMessage, RegisterClassW, SM_CXSMICON, SM_CYSMICON, SW_HIDE, SetForegroundWindow,
+    ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
+    WNDCLASSW,
 };
 use windows::core::{PCWSTR, w};
 
@@ -83,31 +82,6 @@ pub(super) fn hide_console() -> Result<(), WinError> {
         let _ = FreeConsole();
     }
     Ok(())
-}
-
-pub(super) fn open_url(url: &str) -> Result<(), WinError> {
-    let url_w = wide(url);
-    // SAFETY: `url_w` and the static verb are valid NUL-terminated wide strings
-    // living for the duration of the call; all other pointers are null/empty.
-    let result = unsafe {
-        ShellExecuteW(
-            None,
-            w!("open"),
-            PCWSTR(url_w.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    // ShellExecuteW returns an HINSTANCE-typed error/success code: > 32 is OK.
-    if result.0 as isize > 32 {
-        Ok(())
-    } else {
-        Err(WinError::Tray(format!(
-            "ShellExecuteW failed: {}",
-            result.0 as isize
-        )))
-    }
 }
 
 pub(super) fn run_tray<F>(
@@ -309,13 +283,15 @@ fn take_selected() -> Option<u32> {
 }
 
 /// The hidden window's procedure: turn a right-click on the tray icon into a
-/// popup menu, and post-quit on destroy.
+/// popup menu and a left-click into the first item, and post-quit on destroy.
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_TRAY_CALLBACK => {
             let event = (lparam.0 as u32) & 0xffff;
             if event == WM_RBUTTONUP || event == WM_CONTEXTMENU {
                 show_menu(hwnd);
+            } else if event == WM_LBUTTONUP {
+                select_default_item();
             }
             LRESULT(0)
         }
@@ -328,6 +304,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         // the documented default handling.
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
+}
+
+/// A left click runs the first menu item, as if it had been chosen.
+fn select_default_item() {
+    PUMP.with(|slot| {
+        if let Some(state) = slot.borrow_mut().as_mut() {
+            state.selected = state.items.first().map(|item| item.id);
+        }
+    });
 }
 
 /// Build and track the right-click popup menu, recording the chosen command id.

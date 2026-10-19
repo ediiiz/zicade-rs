@@ -12,13 +12,11 @@
 use std::fmt;
 
 mod netmon;
-pub mod service;
 mod sspi;
 pub mod tray;
 mod winhttp;
 
 pub use netmon::{active_dns_suffixes, wait_for_network_change};
-pub use service::ServiceStop;
 pub use sspi::{LoopbackReport, SspiNegotiate, SspiPackage, run_loopback_handshake};
 pub use winhttp::WinHttpPacBackend;
 
@@ -29,9 +27,6 @@ pub enum WinError {
     UnsupportedPlatform,
     /// An SSPI/Win32 call failed with the given `SECURITY_STATUS`/`HRESULT` code.
     Sspi(i32),
-    /// A Service Control Manager operation failed; the message names the failing
-    /// call and its Win32/HRESULT code (e.g. access-denied without Administrator).
-    Service(String),
     /// A system-tray / console / shell-open operation failed; the message names
     /// the failing call and its code.
     Tray(String),
@@ -42,7 +37,6 @@ impl fmt::Display for WinError {
         match self {
             WinError::UnsupportedPlatform => write!(f, "unsupported platform (not Windows)"),
             WinError::Sspi(code) => write!(f, "SSPI call failed: 0x{code:08x}"),
-            WinError::Service(msg) => write!(f, "service control manager error: {msg}"),
             WinError::Tray(msg) => write!(f, "system-tray error: {msg}"),
         }
     }

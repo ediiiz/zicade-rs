@@ -265,33 +265,23 @@ fn negotiate_in_pac_auth_also_checked() {
 }
 
 #[test]
-fn web_auth_required_defaults_false_when_absent() {
-    // Older configs without a `web` section must still load, auth defaulting OFF.
-    let cfg = from_json_str(FULL_EXAMPLE).expect("full example parses without a web section");
+fn legacy_web_section_still_loads_and_is_dropped_on_save() {
+    // Configs written while the browser UI existed carry a `web` section. They
+    // must keep loading after an upgrade, and the next save must not keep
+    // advertising a setting that no longer does anything.
+    let json = r#"{ "listen": { "host": "127.0.0.1", "port": 3129 },
+                    "routing": { "mode": "direct" },
+                    "web": { "authRequired": true } }"#;
+    let cfg = from_json_str(json).expect("a legacy web section must not break loading");
+    let saved = to_json_string(&cfg).unwrap();
     assert!(
-        !cfg.web.auth_required,
-        "web.authRequired must default to false when the section is absent"
+        !saved.contains("\"web\""),
+        "web section survived a save: {saved}"
     );
-}
-
-#[test]
-fn web_auth_required_parses_when_present() {
-    let json = r#"{ "listen": { "host": "127.0.0.1", "port": 3129 },
-                    "routing": { "mode": "direct" },
-                    "web": { "authRequired": true } }"#;
-    let cfg = from_json_str(json).expect("web section parses");
-    assert!(cfg.web.auth_required, "web.authRequired must parse as true");
-}
-
-#[test]
-fn web_auth_required_round_trips() {
-    let json = r#"{ "listen": { "host": "127.0.0.1", "port": 3129 },
-                    "routing": { "mode": "direct" },
-                    "web": { "authRequired": true } }"#;
-    let cfg = from_json_str(json).unwrap();
-    let reparsed = from_json_str(&to_json_string(&cfg).unwrap()).unwrap();
-    assert_eq!(cfg, reparsed, "save then load must be lossless");
-    assert!(reparsed.web.auth_required);
+    assert!(
+        !saved.contains("authRequired"),
+        "authRequired survived a save: {saved}"
+    );
 }
 
 #[test]

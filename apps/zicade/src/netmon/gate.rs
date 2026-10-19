@@ -24,7 +24,7 @@ type Rebuild = Box<dyn Fn(&Config) -> Routing + Send>;
 type Detect = Box<dyn Fn() -> Vec<String> + Send>;
 /// A closure invoked with the current on-corp state whenever it changes:
 /// `Some(true)`/`Some(false)` on an on-/off-corp transition, and `None` when the
-/// gate is disabled (so the web status stops reporting a stale `onCorp`).
+/// gate is disabled (so the status view stops reporting a stale on-corp state).
 type Report = Box<dyn Fn(Option<bool>) + Send>;
 
 /// Whether the corporate-network gate is enabled in `config`.
@@ -108,7 +108,7 @@ impl GateInner {
             let routing = (self.rebuild)(&self.config);
             tracing::info!("corp-network gate disabled; applying configured routing");
             self.routing.set(routing);
-            // Clear any stale on-corp state so the web status stops reporting it.
+            // Clear any stale on-corp state so the status view stops reporting it.
             (self.report)(None);
         }
     }
@@ -159,7 +159,7 @@ impl NetworkGate {
             .evaluate();
     }
 
-    /// Adopt a new config (from the web config-apply hook), re-evaluating now.
+    /// Adopt a new config (from the config-apply hook), re-evaluating now.
     pub(crate) fn reconfigure(&self, config: Config) {
         self.inner
             .lock()

@@ -2,14 +2,10 @@
 //!
 //! Parsing is a **pure** function ([`parse_args`]) over an argument slice
 //! (the process args with `argv[0]` already stripped), returning a [`Command`].
-//! Keeping it free of any side effects — no SCM calls, no runtime, no I/O —
-//! makes the whole dispatch table unit-testable without Administrator or a real
-//! Service Control Manager.
+//! Keeping it free of any side effects — no runtime, no I/O — makes the whole
+//! dispatch table unit-testable without a desktop session.
 
 use std::path::PathBuf;
-
-/// The default Windows service name used when `--name` is omitted.
-pub const DEFAULT_SERVICE_NAME: &str = "Zicade";
 
 /// A parsed top-level command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,27 +18,26 @@ pub enum Command {
     /// Console mode: serve until Ctrl-C. An optional explicit config path
     /// preserves the historical "first arg is the config path" behavior.
     Run { config_path: Option<PathBuf> },
-    /// Run under the Service Control Manager (`service run`): serve until the
-    /// SCM sends STOP/SHUTDOWN.
-    ServiceRun,
-    /// Install the Windows service (`service install [--name NAME]`).
-    ServiceInstall { name: Option<String> },
-    /// Uninstall the Windows service (`service uninstall [--name NAME]`).
-    ServiceUninstall { name: Option<String> },
+    /// Tray mode without opening the window (`--background`), for start on
+    /// login.
+    Background,
     /// Print usage text (`--help`/`-h`/`help`).
     Help,
     /// An unrecognized command; carries the offending token(s) for the message.
     Unknown(String),
 }
 
-/// Where the "no subcommand" default should run: the unchanged console, or the
-/// system-tray (notification-area) mode used when the exe is double-clicked.
+/// How the process runs: in the console, or in the tray with the window open
+/// (a double-click) or closed (`--background`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LaunchMode {
     /// Serve in the console until Ctrl-C (the historical behavior).
     Console,
-    /// Hide the console and run with a system-tray icon.
+    /// Hide the console, run with a tray icon, and open the window.
     Tray,
+    /// Hide the console and run with a tray icon; the window stays closed
+    /// until opened from the tray.
+    Background,
 }
 
 /// Decide the launch mode from the number of processes attached to this
@@ -51,10 +46,11 @@ pub enum LaunchMode {
 /// Pure and total so the whole dispatch rule is unit-testable without a desktop
 /// session. `console_process_count` is `GetConsoleProcessList`'s result: `1`
 /// means we own a freshly-created console (a double-click) and the *default*
-/// command runs in the tray; any other count, or any explicit subcommand,
-/// stays in the console.
+/// command runs in the tray; any other count, or any other explicit
+/// subcommand, stays in the console. `--background` always runs in the tray.
 pub fn launch_mode(console_process_count: usize, command: &Command) -> LaunchMode {
     match command {
+        Command::Background => LaunchMode::Background,
         Command::Default if console_process_count == 1 => LaunchMode::Tray,
         _ => LaunchMode::Console,
     }
@@ -67,10 +63,13 @@ pub fn parse_args(args: &[String]) -> Command {
     };
     match first.as_str() {
         "--help" | "-h" | "help" => Command::Help,
+        "--background" => Command::Background,
         "run" => Command::Run {
             config_path: args.get(1).map(PathBuf::from),
         },
-        "service" => parse_service(&args[1..]),
+        // Service mode is gone; reject it so a stale shortcut fails loudly
+        // instead of serving with a config file named "service".
+        "service" => Command::Unknown(args.join(" ")),
         // A leading flag we do not recognize is an error...
         other if other.starts_with('-') => Command::Unknown(other.to_owned()),
         // ...but any other bare token is treated as an explicit config path,
@@ -79,32 +78,6 @@ pub fn parse_args(args: &[String]) -> Command {
             config_path: Some(PathBuf::from(other)),
         },
     }
-}
-
-/// Parse the tail after the `service` keyword.
-fn parse_service(rest: &[String]) -> Command {
-    match rest.first().map(String::as_str) {
-        Some("run") => Command::ServiceRun,
-        Some("install") => Command::ServiceInstall {
-            name: parse_name(&rest[1..]),
-        },
-        Some("uninstall") => Command::ServiceUninstall {
-            name: parse_name(&rest[1..]),
-        },
-        Some(other) => Command::Unknown(format!("service {other}")),
-        None => Command::Unknown("service".to_owned()),
-    }
-}
-
-/// Scan `args` for `--name NAME`, returning the value if present.
-fn parse_name(args: &[String]) -> Option<String> {
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-        if arg == "--name" {
-            return it.next().cloned();
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -153,9 +126,6 @@ mod tests {
             Command::Run {
                 config_path: Some(PathBuf::from("C:\\cfg.json")),
             },
-            Command::ServiceRun,
-            Command::ServiceInstall { name: None },
-            Command::ServiceUninstall { name: None },
             Command::Help,
             Command::Unknown("--nope".to_owned()),
         ] {
@@ -196,44 +166,26 @@ mod tests {
     }
 
     #[test]
-    fn service_run_is_service_run() {
-        assert_eq!(parse_args(&args(&["service", "run"])), Command::ServiceRun);
-    }
-
-    #[test]
-    fn service_install_without_name() {
+    fn removed_service_commands_are_rejected_not_read_as_a_config_path() {
+        // Old shortcuts and scripts still run `zicade service run`; that must
+        // fail loudly rather than serve with a config file named "service".
         assert_eq!(
-            parse_args(&args(&["service", "install"])),
-            Command::ServiceInstall { name: None }
+            parse_args(&args(&["service", "run"])),
+            Command::Unknown("service run".to_owned())
+        );
+        assert_eq!(
+            parse_args(&args(&["service"])),
+            Command::Unknown("service".to_owned())
         );
     }
 
     #[test]
-    fn service_install_with_name() {
-        assert_eq!(
-            parse_args(&args(&["service", "install", "--name", "Zicade-Test"])),
-            Command::ServiceInstall {
-                name: Some("Zicade-Test".to_owned()),
-            }
-        );
-    }
-
-    #[test]
-    fn service_uninstall_without_name() {
-        assert_eq!(
-            parse_args(&args(&["service", "uninstall"])),
-            Command::ServiceUninstall { name: None }
-        );
-    }
-
-    #[test]
-    fn service_uninstall_with_name() {
-        assert_eq!(
-            parse_args(&args(&["service", "uninstall", "--name", "Zicade-Test"])),
-            Command::ServiceUninstall {
-                name: Some("Zicade-Test".to_owned()),
-            }
-        );
+    fn background_flag_starts_in_the_tray_without_a_window() {
+        // Start-on-login uses this: the proxy must come up, but popping the
+        // window at every sign-in would be noise.
+        assert_eq!(parse_args(&args(&["--background"])), Command::Background);
+        assert_eq!(launch_mode(0, &Command::Background), LaunchMode::Background);
+        assert_eq!(launch_mode(2, &Command::Background), LaunchMode::Background);
     }
 
     #[test]
@@ -241,22 +193,6 @@ mod tests {
         assert_eq!(parse_args(&args(&["--help"])), Command::Help);
         assert_eq!(parse_args(&args(&["-h"])), Command::Help);
         assert_eq!(parse_args(&args(&["help"])), Command::Help);
-    }
-
-    #[test]
-    fn unknown_service_subcommand() {
-        assert_eq!(
-            parse_args(&args(&["service", "frobnicate"])),
-            Command::Unknown("service frobnicate".to_owned())
-        );
-    }
-
-    #[test]
-    fn bare_service_is_unknown() {
-        assert_eq!(
-            parse_args(&args(&["service"])),
-            Command::Unknown("service".to_owned())
-        );
     }
 
     #[test]

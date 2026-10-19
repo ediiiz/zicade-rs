@@ -1,12 +1,12 @@
 # Zicade
 
 Zicade is a small, local forwarding **HTTP/HTTPS proxy** for Windows with a
-loopback web UI. It listens on `127.0.0.1`, forwards plain HTTP (absolute-form →
+native desktop window. It listens on `127.0.0.1`, forwards plain HTTP (absolute-form →
 origin-form) and tunnels `CONNECT`, and can route either directly to origins or
 through an upstream corporate proxy — including an SSPI **Negotiate** (Kerberos/
-NTLM) handshake against that upstream. A companion local web server exposes a
-JSON API and a browser UI for editing the config, watching live logs, and
-reading status.
+NTLM) handshake against that upstream. A native window (built with
+[gpui-kit](https://gpui-kit.com)) edits the config, shows live status and
+throughput, and follows the logs.
 
 The workspace is a strict-TDD Cargo workspace:
 
@@ -18,7 +18,8 @@ The workspace is a strict-TDD Cargo workspace:
 | `zicade-win` | The **only** crate with `unsafe`/FFI: SSPI + WinHTTP PAC |
 | `zicade-proxy` | The proxy data path (accept loop, forwarding, tunneling, shutdown) |
 | `zicade-observe` | `tracing` layer → in-memory ring buffer + broadcast for the UI |
-| `zicade-web` | axum JSON API + UI, token-gated mutations |
+| `zicade-control` | The UI's handle on the running app: redacted config, live apply, status |
+| `zicade-ui` | The native window (gpui-kit): status, configuration, logs |
 | `apps/zicade` | The binary: wires everything together and owns the lifecycle |
 
 ## Build prerequisites
@@ -26,16 +27,12 @@ The workspace is a strict-TDD Cargo workspace:
 - **Target toolchain:** `x86_64-pc-windows-gnu`
   (`rustup target add x86_64-pc-windows-gnu`). The build is pinned to this target
   via `.cargo/config.toml`.
-- **w64devkit on PATH:** `C:\Users\<you>\tools\w64devkit\bin` must be reachable.
-  The GNU toolchain there provides the linker (`gcc` → `collect2` → `ld`) and
-  `dlltool`. `.cargo/config.toml` wires the linker, `COMPILER_PATH`, and
-  `-Cdlltool=...` for the target build, **but host proc-macro dependencies**
-  (e.g. `rust-embed`) still need `dlltool`/`ld` on `PATH`, so prepend that bin
-  directory before running cargo:
-
-  ```sh
-  export PATH="/c/Users/<you>/tools/w64devkit/bin:$PATH"
-  ```
+- **w64devkit:** `C:\Users\<you>\tools\w64devkit\bin` provides the linker
+  (`gcc` -> `collect2` -> `ld`) and `dlltool`; `.cargo/config.toml` wires them in.
+- **Release builds of the UI** compile gpui's shaders with `fxc.exe` from the
+  Windows SDK. CI (MSVC, with the SDK) has it; for a local release build install
+  the SDK or point `GPUI_FXC_PATH` at an `fxc.exe`. Debug builds compile the
+  shaders at runtime and need nothing extra.
 
 - **crates.io reachability:** the initial dependency download must reach
   crates.io. On the corporate network this is the catch: **dependency downloads
@@ -75,34 +72,28 @@ The wizard first asks who to install for:
   (`%LOCALAPPDATA%\Programs\Zicade`), **no administrator rights and no UAC
   prompt**.
 - **Install for all users** — installs to `Program Files\Zicade`. Choosing this
-  triggers a **UAC elevation prompt** (only then); required for the
-  Windows-service option below.
+  triggers a **UAC elevation prompt** (only then).
 
 ### Startup options
 
-A **Select Additional Tasks** page offers two off-by-default ways to start
-Zicade automatically:
+A **Select Additional Tasks** page offers an off-by-default **Start on
+sign-in** task: a `Run`-key entry (per-user `HKCU` or all-users `HKLM`, matching
+the scope) that launches `zicade --background` at login: the
+[tray](#system-tray-mode-double-click) without the window (a console window may
+flash briefly before it self-hides).
 
-- **Start on sign-in** — adds a `Run`-key entry (per-user `HKCU` or all-users
-  `HKLM`, matching the scope) so Zicade launches at login. Because it starts
-  with no subcommand, it runs in
-  [system-tray mode](#system-tray-mode-double-click) (a console window may flash
-  briefly before it self-hides).
-- **Run as a Windows service** — registers the auto-start
-  [Windows service](#run-as-a-windows-service) via `zicade service install`.
-  Only offered for an **all-users** install (a machine service needs admin).
+Older versions could also register a Windows service. That mode is gone: an
+all-users install stops and deletes a leftover `Zicade` service before copying
+files, and the uninstaller removes one too.
 
 The uninstaller (in *Add or remove programs*) removes the exe, Start-Menu
-shortcut, the `Run`-key entry, and — for an all-users install — the service.
+shortcut, and the `Run`-key entry.
 
 ### Silent install
 
 Inno Setup supports unattended switches, e.g.:
 
 ```sh
-# All users + auto-start service, no UI:
-zicade-<version>-setup.exe /VERYSILENT /ALLUSERS /TASKS="runasservice"
-
 # Just me + start in the tray on sign-in:
 zicade-<version>-setup.exe /VERYSILENT /CURRENTUSER /TASKS="startonlogin"
 
@@ -131,8 +122,8 @@ On startup the binary:
 1. Resolves the config path (first CLI argument, else the default below).
 2. Loads the config, or writes the defaults on first run.
 3. Installs the tracing subscriber (level/format from `logging`).
-4. Binds the proxy and the web server on loopback, then serves until `Ctrl-C`
-   (graceful shutdown drains in-flight connections).
+4. Binds the proxy on loopback, then serves until `Ctrl-C` (graceful shutdown
+   drains in-flight connections).
 
 Pass an explicit config path if you like:
 
@@ -140,47 +131,15 @@ Pass an explicit config path if you like:
 cargo run -p zicade -- C:\path\to\config.json
 ```
 
-### Addresses
+### Address
 
-- **Proxy:** `config.listen` — default `127.0.0.1:3129`.
-- **Web UI / API:** the **proxy port + 1**, same host — default `127.0.0.1:3130`.
-
-Point your browser or system proxy at the proxy address; open the web address in
-a browser for the UI.
+**Proxy:** `config.listen` (default `127.0.0.1:3129`). Point your browser or
+system proxy at it. Console mode has no window; edit the config file, or run in
+the tray for the UI.
 
 ### Default config location
 
 `%LOCALAPPDATA%\Zicade\config.json` (created with defaults on first run).
-
-## Run as a Windows Service
-
-Zicade can run under the Service Control Manager (SCM) instead of a console.
-Console mode remains the default and is unchanged.
-
-Install, then start (both require an **elevated / Administrator** prompt):
-
-```sh
-zicade service install            # register (auto-start, own-process)
-zicade service install --name MyZicade   # ...under a custom service name
-sc start Zicade                   # start now (or reboot: it is auto-start)
-```
-
-Uninstall:
-
-```sh
-sc stop Zicade                    # optional; stopping maps to graceful shutdown
-zicade service uninstall          # delete the service (add --name to match install)
-```
-
-Notes:
-
-- The installed service runs `zicade service run` from the current executable
-  path and serves the proxy + web UI exactly as console mode does.
-- **Stopping the service** (`sc stop`, `services.msc`, or system shutdown) sends
-  `SERVICE_CONTROL_STOP`/`SHUTDOWN`, which is mapped to the app's existing
-  **graceful shutdown** (in-flight connections drain, same as Ctrl-C).
-- Without Administrator, install/uninstall fail cleanly with an access-denied
-  message (no panic).
 
 ## System-tray mode (double-click)
 
@@ -189,20 +148,22 @@ and tray mode by how it was started:
 
 - **Double-clicked in Explorer** — the process owns a freshly-created console
   (detected via `GetConsoleProcessList` returning `1`). Zicade **hides that
-  console** and runs with a **system-tray (notification-area) icon**, serving the
-  proxy + web UI exactly as console mode does.
+  console**, runs with a **system-tray (notification-area) icon**, and opens the
+  [window](#the-window).
 - **Run as `zicade` from an existing cmd/PowerShell** — the console is shared
   (process count `> 1`), so it stays in **console mode** as before.
 
-Explicit subcommands never enter tray mode: `zicade run`, `zicade service …`, and
-`zicade --help` always keep their current behavior regardless of how they were
-launched.
+`zicade --background` runs in the tray without opening the window (start on
+sign-in uses it). Other explicit subcommands never enter tray mode: `zicade run`
+and `zicade --help` keep their behavior regardless of how they were launched.
 
 The tray icon's right-click menu has exactly two items:
 
-- **Open WebUI** — opens the web UI (`http://127.0.0.1:3130/`, i.e. the proxy
-  port + 1 from the loaded config) in the default browser.
-- **Close** — triggers the same graceful shutdown as Ctrl-C and exits.
+- **Open Zicade**: opens the window, or brings it forward. A left-click on the
+  icon does the same.
+- **Close**: triggers the same graceful shutdown as Ctrl-C and exits.
+
+Closing the window keeps the proxy running in the tray.
 
 ### Config schema (brief)
 
@@ -256,64 +217,38 @@ active adapters' connection-specific DNS suffixes against `dnsSuffixes`
 Detection is event-driven (it reacts to Windows address-change notifications)
 with `pollSeconds` as a re-check fallback. The on-corp routing is rebuilt on each
 reconnect, so `source = "auto"` re-reads the system PAC after you rejoin the
-network (even if the app started off-corp). The web status panel shows the
+network (even if the app started off-corp). The status page shows the
 current **on-corp** state, and routing swaps live with no restart. Off-Windows,
 or if adapter enumeration fails, detection is unavailable and the configured
 routing applies unchanged (the feature is purely additive). Enabling the gate
 from the UI when it was off at startup requires a restart; changing suffixes or
 toggling it while it is already running takes effect immediately.
 
-## Web UI
+## The window
 
-- **URL:** `http://127.0.0.1:3130/` (proxy port + 1).
-- A clean, theme-aware control panel (vendored [Pico CSS] v2.1.1, embedded and
-  served same-origin — **no external CDN**, so it works fully offline). The form
-  exposes **every** config field (listen, routing mode, upstream + its auth, PAC
-  + its auth, corporate-network detection, logging, and the web-auth toggle); the
-  upstream/PAC/corp-network subsections show or hide based on the selected routing
-  mode. Edits are serialized back to
-  the same JSON schema the backend validates, so invalid input returns a `4xx`
-  shown inline.
-- **Read-only** endpoints (`GET /api/config`, `GET /api/status`,
-  `GET /events/logs` SSE) are open on loopback.
-- A **live status panel** shows the active routing mode, the corporate-network
-  on-corp state (when the gate is enabled), listen address, total
-  and failed request counts, active connections, and current in/out throughput
-  with a 60-second inline-SVG sparkline. It is driven by a `GET /events/metrics`
-  SSE stream (one `StatusSnapshot` per second; the client derives byte/s from the
-  cumulative `bytes_in`/`bytes_out` deltas) and shows a reachable/unreachable dot.
+A native window (gpui-kit; follows the system light/dark theme) with three pages:
+
+- **Status**: routing mode, corporate-network on-corp state (when the gate is
+  enabled), listen address, total and failed requests, active connections, and
+  current in/out throughput with a 60-second chart, refreshed once a second.
   Throughput currently reflects `CONNECT`-tunnelled (HTTPS) bytes, counted from
-  the tunnel's bidirectional copy. Routing/auth edits saved from the form apply
-  to the running proxy without a restart; a listen host/port change still needs
-  a restart.
+  the tunnel's bidirectional copy.
+- **Configuration**: every config field (listen, routing mode, upstream + its
+  auth, PAC + its auth, corporate-network detection, logging); the
+  upstream/PAC/corp-network sections show for the routing mode that uses them.
+  Saving validates, writes the config file, and applies routing/auth edits to
+  the running proxy without a restart; a listen host/port change still needs a
+  restart. Stored passwords are never shown: leave a password blank to keep the
+  saved one.
+- **Logs**: the live log stream, starting with the buffered backlog.
 
-### Web-UI auth (`web.authRequired`, default **off**)
-
-- **Mutations** (`PUT /api/config`) are gated by the `web.authRequired` flag in
-  the config's `web` section:
-
-  ```json
-  "web": { "authRequired": false }
-  ```
-
-- **Default `false`** — auth is normally unneeded because the web server binds
-  to loopback (`127.0.0.1`) only, so nothing off-box can reach it. Configs
-  without a `web` section still load and default to off.
-- Set **`web.authRequired = true`** to require the local UI token in the
-  `X-Zicade-Token` header on every mutation (missing/wrong token → `401`). That
-  custom-header requirement also doubles as CSRF protection (a cross-site
-  request cannot set an arbitrary header). Read-only endpoints stay open on
-  loopback either way.
-- **Token file:** `%LOCALAPPDATA%\Zicade\ui-token`, created on first run
-  (32 hex chars). When auth is on, read it from that file and send it as
-  `X-Zicade-Token` (the UI has a token field for this).
-
-[Pico CSS]: https://picocss.com
+The window talks to the proxy in-process; nothing listens besides the proxy.
+Configs from older versions with a `web` section still load; the section is
+dropped on the next save.
 
 ## Testing
 
 ```sh
-export PATH="/c/Users/<you>/tools/w64devkit/bin:$PATH"
 cargo test            # full workspace suite (deterministic, no network)
 ```
 
@@ -339,18 +274,6 @@ The live PAC check exercises the `source = "auto"` discovery path (per-user
 AutoConfigURL -> WPAD -> static proxy). It is tolerant of hosts with nothing
 configured (a common corporate setup that pushes routing via GPO): discovery
 maps "no config" to DIRECT, so it logs the real decision rather than failing.
-
-### Service install/uninstall test (gated, elevated)
-
-Creating and deleting a real service needs Administrator and a live SCM, so it
-is gated behind `ZICADE_SERVICE_IT=1` and `#[ignore]`d (the default suite stays
-hermetic and admin-free). From an **elevated** shell:
-
-```sh
-ZICADE_SERVICE_IT=1 cargo test -p zicade-win --test service_it -- --ignored
-```
-
-It installs then immediately deletes a throwaway `ZicadeServiceItTest` service.
 
 ## Known limitations
 
