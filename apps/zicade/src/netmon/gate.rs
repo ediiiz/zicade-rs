@@ -168,7 +168,7 @@ impl NetworkGate {
     /// Spawn the monitor thread: evaluate, then block until a network change or
     /// the poll interval elapses, until `shutdown` flips to `true`. Detached —
     /// the process tears it down on exit, so it is never joined.
-    pub(crate) fn spawn(self, shutdown: watch::Receiver<bool>) {
+    pub(crate) fn spawn(self, shutdown: watch::Receiver<bool>) -> std::io::Result<()> {
         thread::Builder::new()
             .name("zicade-netmon".to_owned())
             .spawn(move || {
@@ -184,8 +184,8 @@ impl NetworkGate {
                     zicade_win::wait_for_network_change(poll);
                 }
                 tracing::debug!("corp-network gate thread exiting on shutdown");
-            })
-            .expect("spawn zicade-netmon thread");
+            })?;
+        Ok(())
     }
 }
 

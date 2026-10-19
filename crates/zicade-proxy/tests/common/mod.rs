@@ -1,6 +1,6 @@
 //! Shared test harness for the direct-mode proxy integration tests:
 //! in-process fake origins, a raw proxy client, and a spawned proxy handle.
-#![allow(dead_code)]
+#![allow(dead_code, reason = "each test binary uses a different subset")]
 
 pub mod client;
 pub mod origin;

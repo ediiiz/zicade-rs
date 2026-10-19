@@ -58,6 +58,13 @@ too_many_arguments = "warn"
 type_complexity = "warn"
 large_enum_variant = "warn"
 module_inception = "warn"
+# Rules from the coding agreement that would otherwise live only in prose.
+# `unwrap_used`/`expect_used` are not here: test helpers outside `#[test]` fns
+# would trip them. CI checks them on non-test targets only (see ci.yml).
+undocumented_unsafe_blocks = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+todo = "warn"
 
 [workspace.lints.rust]
 unused_must_use = "warn"

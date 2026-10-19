@@ -146,9 +146,10 @@ pub(crate) async fn connect_via_upstream(
     }
 }
 
-// The complexity is the multi-leg 407 auth loop plus its per-leg tracing; the
-// legs form one cohesive handshake and read more clearly kept together.
-#[allow(clippy::cognitive_complexity)]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "the multi-leg 407 loop plus per-leg tracing reads as one handshake"
+)]
 async fn connect_handshake(
     upstream_addr: &str,
     target: &str,
