@@ -176,7 +176,8 @@ impl App {
         // shutdown signal so it winds down with everything else. While the gate
         // is disabled the thread just polls and does nothing, so it is always
         // spawned — enabling the gate live via the UI then takes effect.
-        gate.spawn(tx.subscribe());
+        gate.spawn(tx.subscribe())
+            .context("start the corp-network monitor thread")?;
 
         let proxy_tx = tx.clone();
         let proxy_fut = {

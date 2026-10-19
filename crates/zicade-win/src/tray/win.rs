@@ -45,10 +45,10 @@ struct PumpState {
     selected: Option<u32>,
 }
 
-// The initializer is already a `const {}` block; this clippy version still
-// flags the macro (a known false positive that no initializer form satisfies),
-// so silence it locally.
-#[allow(clippy::missing_const_for_thread_local)]
+#[allow(
+    clippy::missing_const_for_thread_local,
+    reason = "false positive: the initializer is already a `const {}` block"
+)]
 mod tls {
     use super::{PumpState, RefCell};
 
@@ -196,6 +196,7 @@ fn load_tray_icon() -> HICON {
     if let Ok(module) = unsafe { GetModuleHandleW(PCWSTR::null()) } {
         // SAFETY: GetSystemMetrics just reads a system-wide constant.
         let cx = unsafe { GetSystemMetrics(SM_CXSMICON) };
+        // SAFETY: as above.
         let cy = unsafe { GetSystemMetrics(SM_CYSMICON) };
         // SAFETY: loads icon resource `APP_ICON_RESOURCE_ID` from our module at
         // the small-icon size. Casting the numeric id to a pointer is the

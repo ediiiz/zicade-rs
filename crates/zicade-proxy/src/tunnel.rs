@@ -85,9 +85,10 @@ pub(crate) async fn tunnel(
 /// Splice bytes between the upgraded client connection and an already-connected
 /// `peer` (a direct origin, or an authenticated upstream tunnel), tallying the
 /// bytes into `metrics` and logging the tunnel's establishment and close.
-// The complexity is the two structured lifecycle-log arms plus the select/drain
-// close policy; splitting it would scatter the tunnel's teardown logic.
-#[allow(clippy::cognitive_complexity)]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "lifecycle-log arms plus the close policy; splitting scatters teardown"
+)]
 pub(crate) async fn splice(
     upgraded: Upgraded,
     peer: TcpStream,

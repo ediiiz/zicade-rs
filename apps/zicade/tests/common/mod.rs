@@ -2,7 +2,7 @@
 //! [`LiveProxy`] harness, raw HTTP/CONNECT helpers, a hand-built TLS ClientHello,
 //! and sequential/concurrent soak drivers. Kept in `tests/common` so it compiles
 //! as a helper module rather than its own test binary.
-#![allow(dead_code)]
+#![allow(dead_code, reason = "each test binary uses a different subset")]
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};

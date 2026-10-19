@@ -77,10 +77,13 @@ pub fn run_tray_mode() -> ExitCode {
     tracing::info!(web = %web_url, "zicade started in tray mode");
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let server = thread::Builder::new()
+    let server = match thread::Builder::new()
         .name("zicade-runtime".to_owned())
         .spawn(move || serve_on_runtime(config, config_path, logs, log_reload, shutdown_rx))
-        .expect("spawn zicade runtime thread");
+    {
+        Ok(handle) => handle,
+        Err(err) => return fail(&format!("could not start the runtime thread: {err}")),
+    };
 
     let pump = tray::run_tray("Zicade proxy", tray_menu_items(), move |id| {
         on_tray_event(id, &web_url, &shutdown_tx)

@@ -57,7 +57,8 @@ pub(crate) fn build_pac(config: &Config) -> anyhow::Result<Routing> {
         "PAC per-request routing enabled"
     );
 
-    let tx = spawn_resolver(pac.source, pac.url.clone(), pac.path.clone());
+    let tx = spawn_resolver(pac.source, pac.url.clone(), pac.path.clone())
+        .context("start the PAC resolver thread")?;
     let routing = Arc::new(config.routing.clone());
     let cache = Arc::new(PacCache::new(CACHE_TTL));
     let router: PacRouter = Arc::new(move |url: String| {
@@ -143,7 +144,11 @@ impl PacCache {
 
 /// Spawn the dedicated thread that owns the WinHTTP backend and serves resolve
 /// requests one at a time (the raw session handle stays on this thread).
-fn spawn_resolver(source: PacSource, url: Option<String>, path: Option<String>) -> ResolverTx {
+fn spawn_resolver(
+    source: PacSource,
+    url: Option<String>,
+    path: Option<String>,
+) -> std::io::Result<ResolverTx> {
     let (tx, mut rx) = mpsc::unbounded_channel::<ResolveJob>();
     thread::Builder::new()
         .name("zicade-pac".to_owned())
@@ -160,8 +165,8 @@ fn spawn_resolver(source: PacSource, url: Option<String>, path: Option<String>) 
                 let _ = reply.send(result);
             }
         })
-        .expect("spawn PAC resolver thread");
-    tx
+        ?;
+    Ok(tx)
 }
 
 /// Build the WinHTTP backend for the configured [`PacSource`]. The error is a
