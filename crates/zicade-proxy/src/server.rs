@@ -2,6 +2,7 @@
 
 use std::future::Future;
 use std::net::SocketAddr;
+use std::sync::PoisonError;
 use std::time::Duration;
 
 use tokio::net::TcpListener;
@@ -30,17 +31,21 @@ impl RoutingHandle {
         Self(std::sync::Arc::new(std::sync::Mutex::new(routing)))
     }
 
-    /// A clone of the current routing (falls back to [`Routing::Direct`] if the
-    /// lock is poisoned rather than panicking).
+    /// A clone of the current routing.
+    ///
+    /// A poisoned lock is recovered rather than defaulted: the value is only ever
+    /// replaced wholesale, so it is never half-written, and falling back to
+    /// `Direct` would silently route traffic around the configured upstream.
     pub fn current(&self) -> Routing {
-        self.0.lock().map(|g| g.clone()).unwrap_or_default()
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Atomically replace the routing; observed by the next accepted connection.
     pub fn set(&self, routing: Routing) {
-        if let Ok(mut g) = self.0.lock() {
-            *g = routing;
-        }
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = routing;
     }
 }
 
@@ -156,6 +161,25 @@ mod tests {
             auth: UpstreamAuth::None,
         }));
         assert_eq!(format!("{:?}", handle.current()), "Upstream");
+    }
+
+    #[test]
+    fn poisoned_routing_handle_keeps_routing_instead_of_going_direct() {
+        let handle = RoutingHandle::new(Routing::Upstream(UpstreamTarget {
+            addr: "127.0.0.1:8080".to_owned(),
+            auth: UpstreamAuth::None,
+        }));
+        let poisoner = handle.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.0.lock();
+            panic!("poison the routing lock");
+        })
+        .join();
+        assert!(handle.0.is_poisoned());
+
+        assert_eq!(format!("{:?}", handle.current()), "Upstream");
+        handle.set(Routing::Direct);
+        assert_eq!(format!("{:?}", handle.current()), "Direct");
     }
 
     #[tokio::test]
