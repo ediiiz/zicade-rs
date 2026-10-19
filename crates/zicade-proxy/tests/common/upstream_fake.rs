@@ -320,10 +320,10 @@ async fn read_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
 
 fn content_length(head: &str) -> usize {
     for line in head.split("\r\n") {
-        if let Some((k, v)) = line.split_once(':') {
-            if k.trim().eq_ignore_ascii_case("content-length") {
-                return v.trim().parse().unwrap_or(0);
-            }
+        if let Some((k, v)) = line.split_once(':')
+            && k.trim().eq_ignore_ascii_case("content-length")
+        {
+            return v.trim().parse().unwrap_or(0);
         }
     }
     0

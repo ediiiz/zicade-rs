@@ -58,21 +58,21 @@ pub(crate) enum Strategy {
 /// Choose the discovery [`Strategy`] from an [`IeProxyConfig`], applying the
 /// MSDN precedence: AutoConfigUrl > WPAD auto-detect > static proxy > direct.
 pub(crate) fn select_strategy(cfg: &IeProxyConfig) -> Strategy {
-    if let Some(url) = cfg.auto_config_url.as_deref() {
-        if !url.trim().is_empty() {
-            return Strategy::ConfigUrl(url.to_owned());
-        }
+    if let Some(url) = cfg.auto_config_url.as_deref()
+        && !url.trim().is_empty()
+    {
+        return Strategy::ConfigUrl(url.to_owned());
     }
     if cfg.auto_detect {
         return Strategy::Wpad;
     }
-    if let Some(proxy) = cfg.proxy.as_deref() {
-        if !proxy.trim().is_empty() {
-            return Strategy::StaticProxy {
-                proxy: proxy.to_owned(),
-                bypass: cfg.bypass.clone(),
-            };
-        }
+    if let Some(proxy) = cfg.proxy.as_deref()
+        && !proxy.trim().is_empty()
+    {
+        return Strategy::StaticProxy {
+            proxy: proxy.to_owned(),
+            bypass: cfg.bypass.clone(),
+        };
     }
     Strategy::Direct
 }

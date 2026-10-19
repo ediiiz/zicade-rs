@@ -271,10 +271,10 @@ extern "system" fn control_handler(
                 15000,
             );
         }
-        if let Ok(slot) = STOP.lock() {
-            if let Some(stop) = slot.as_ref() {
-                stop.trigger();
-            }
+        if let Ok(slot) = STOP.lock()
+            && let Some(stop) = slot.as_ref()
+        {
+            stop.trigger();
         }
     }
     0 // NO_ERROR
