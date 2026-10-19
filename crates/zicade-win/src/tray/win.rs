@@ -210,10 +210,10 @@ fn load_tray_icon() -> HICON {
                 LR_DEFAULTCOLOR | LR_SHARED,
             )
         };
-        if let Ok(handle) = loaded {
-            if !handle.is_invalid() {
-                return HICON(handle.0);
-            }
+        if let Ok(handle) = loaded
+            && !handle.is_invalid()
+        {
+            return HICON(handle.0);
         }
     }
     // SAFETY: a null instance with IDI_APPLICATION loads the shared system icon.
@@ -293,11 +293,11 @@ where
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        if let Some(cmd) = take_selected() {
-            if on_event(cmd) == TrayControl::Quit {
-                let _ = hwnd; // window torn down by the caller after we return
-                return Ok(());
-            }
+        if let Some(cmd) = take_selected()
+            && on_event(cmd) == TrayControl::Quit
+        {
+            let _ = hwnd; // window torn down by the caller after we return
+            return Ok(());
         }
     }
 }

@@ -256,12 +256,11 @@ async fn forward_http(req: Request<Incoming>) -> Result<Response<BoxedBody>, For
 fn to_origin_form(req: Request<Incoming>) -> Request<Incoming> {
     let (mut parts, body) = req.into_parts();
 
-    if !parts.headers.contains_key(HOST) {
-        if let Some(auth) = parts.uri.authority() {
-            if let Ok(value) = HeaderValue::from_str(auth.as_str()) {
-                parts.headers.insert(HOST, value);
-            }
-        }
+    if !parts.headers.contains_key(HOST)
+        && let Some(auth) = parts.uri.authority()
+        && let Ok(value) = HeaderValue::from_str(auth.as_str())
+    {
+        parts.headers.insert(HOST, value);
     }
 
     let origin_form = parts

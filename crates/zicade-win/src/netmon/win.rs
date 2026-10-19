@@ -64,10 +64,10 @@ pub(super) fn active_dns_suffixes() -> Vec<String> {
         if node.OperStatus == IfOperStatusUp && !node.DnsSuffix.is_null() {
             // SAFETY: `DnsSuffix` is a non-null, NUL-terminated wide string owned
             // by the node; read once here.
-            if let Ok(s) = unsafe { node.DnsSuffix.to_string() } {
-                if !s.is_empty() {
-                    out.push(s);
-                }
+            if let Ok(s) = unsafe { node.DnsSuffix.to_string() }
+                && !s.is_empty()
+            {
+                out.push(s);
             }
         }
         cur = node.Next;
