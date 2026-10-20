@@ -8,6 +8,8 @@ NTLM) handshake against that upstream. A native window (built with
 [gpui-kit](https://gpui-kit.com)) edits the config, shows live status and
 throughput, and follows the logs.
 
+![Zicade's overview: the proxy is running and routing with the PAC script on the corporate network, with live throughput, totals, and what is in flight](docs/screenshots/overview.png)
+
 The workspace is a strict-TDD Cargo workspace:
 
 | Crate | Responsibility |
@@ -15,11 +17,11 @@ The workspace is a strict-TDD Cargo workspace:
 | `zicade-config` | Config schema, load/save, validation |
 | `zicade-routing` | PAC parsing + `RouteResolver` seam |
 | `zicade-auth` | Upstream authenticator + Negotiate handshake state machine |
-| `zicade-win` | The **only** crate with `unsafe`/FFI: SSPI + WinHTTP PAC |
-| `zicade-proxy` | The proxy data path (accept loop, forwarding, tunneling, shutdown) |
+| `zicade-win` | The **only** crate with `unsafe`/FFI: SSPI, WinHTTP PAC, tray icon, network changes |
+| `zicade-proxy` | The proxy data path (accept loop, forwarding, tunneling, connection tracking, shutdown) |
 | `zicade-observe` | `tracing` layer → in-memory ring buffer + broadcast for the UI |
 | `zicade-control` | The UI's handle on the running app: redacted config, live apply, status |
-| `zicade-ui` | The native window (gpui-kit): status, configuration, logs |
+| `zicade-ui` | The native window (gpui-kit): overview, connections, logs, settings |
 | `apps/zicade` | The binary: wires everything together and owns the lifecycle |
 
 ## Build prerequisites
@@ -254,7 +256,12 @@ sidebar of four pages. Ctrl+1 to Ctrl+4 switch pages and Ctrl+S saves settings.
   change still needs a restart). Stored passwords are never shown: leave a
   password blank to keep the saved one.
 
-To look at the window with sample data and no running proxy:
+| Connections | Logs | Settings |
+| --- | --- | --- |
+| ![Connections: open, closed, and failed requests with their route, bytes, and live rate](docs/screenshots/connections.png) | ![Logs: the live log stream with level filter and search](docs/screenshots/logs.png) | ![Settings in the light theme: proxy address, routing, and PAC script](docs/screenshots/settings.png) |
+
+To look at the window with sample data and no running proxy (the screenshots
+above come from it):
 
 ```sh
 cargo run -p zicade-ui --example preview -- [overview|connections|logs|settings] [light|dark]
