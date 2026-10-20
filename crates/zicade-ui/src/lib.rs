@@ -7,6 +7,7 @@
 //! returns only if the UI loop ends. The window is opened and brought forward
 //! on [`UiCommand::Show`]; closing it leaves the app (and the proxy) running.
 
+mod assets;
 pub mod choices;
 pub mod connection_rates;
 pub mod form_model;
@@ -16,7 +17,7 @@ pub mod throughput;
 mod views;
 
 pub use shell::{MainWindow, follow_tray};
-pub use views::MainView;
+pub use views::{MainView, Page, bind_keys};
 
 use tokio::sync::mpsc::UnboundedReceiver;
 use zicade_control::Control;

@@ -1,34 +1,26 @@
-//! Drop-downs offer exactly the spellings the config file uses, and every
-//! option maps back to the enum it names.
+//! Drop-downs show readable labels but store exactly the spellings the config
+//! file uses, and every option maps back to the enum it names.
 
 use zicade_config::{AuthMode, FailPolicy, PacSource, RoutingMode, SspiPackage};
 use zicade_ui::choices::{
-    AUTH_MODES, FAIL_POLICIES, LOG_FORMATS, LOG_LEVELS, PAC_SOURCES, ROUTING_MODES, SSPI_PACKAGES,
-    index_of, name_of, parse,
+    AUTH_MODES, FAIL_POLICIES, Item, LOG_FORMATS, LOG_LEVELS, PAC_SOURCES, ROUTING_MODES,
+    SSPI_PACKAGES, index_of, labels, name_of, parse,
 };
+
+fn round_trips<T: serde::Serialize + serde::de::DeserializeOwned>(options: &[Item]) {
+    for option in options {
+        let value: T = parse(option.name).unwrap_or_else(|| panic!("{} parses", option.name));
+        assert_eq!(name_of(&value), option.name);
+    }
+}
 
 #[test]
 fn every_option_parses_and_names_itself() {
-    for name in ROUTING_MODES {
-        let mode: RoutingMode = parse(name).unwrap();
-        assert_eq!(name_of(&mode), name);
-    }
-    for name in AUTH_MODES {
-        let mode: AuthMode = parse(name).unwrap();
-        assert_eq!(name_of(&mode), name);
-    }
-    for name in SSPI_PACKAGES {
-        let package: SspiPackage = parse(name).unwrap();
-        assert_eq!(name_of(&package), name);
-    }
-    for name in PAC_SOURCES {
-        let source: PacSource = parse(name).unwrap();
-        assert_eq!(name_of(&source), name);
-    }
-    for name in FAIL_POLICIES {
-        let policy: FailPolicy = parse(name).unwrap();
-        assert_eq!(name_of(&policy), name);
-    }
+    round_trips::<RoutingMode>(&ROUTING_MODES);
+    round_trips::<AuthMode>(&AUTH_MODES);
+    round_trips::<SspiPackage>(&SSPI_PACKAGES);
+    round_trips::<PacSource>(&PAC_SOURCES);
+    round_trips::<FailPolicy>(&FAIL_POLICIES);
 }
 
 #[test]
@@ -43,4 +35,18 @@ fn a_value_missing_from_the_list_selects_nothing() {
     assert_eq!(index_of(&LOG_LEVELS, "info"), Some(2));
     assert_eq!(index_of(&LOG_LEVELS, "verbose"), None);
     assert_eq!(index_of(&LOG_FORMATS, "json"), Some(0));
+}
+
+#[test]
+fn labels_are_readable_and_distinct_from_config_names() {
+    assert_eq!(
+        labels(&ROUTING_MODES),
+        ["Direct", "Upstream proxy", "PAC script"]
+    );
+    for options in [&AUTH_MODES[..], &PAC_SOURCES[..], &FAIL_POLICIES[..]] {
+        let shown = labels(options);
+        let mut unique = shown.clone();
+        unique.dedup();
+        assert_eq!(shown, unique, "labels must tell options apart");
+    }
 }

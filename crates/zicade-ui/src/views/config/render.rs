@@ -1,39 +1,47 @@
-//! How the form is laid out: one group per config section, showing only the
-//! sections the selected routing mode uses.
+//! How the settings are laid out: one titled section per concern, labels
+//! beside their fields with help underneath, and only the sections the
+//! selected routing mode uses.
 
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::form::{field, v_form};
-use gpui_kit::component::group_box::GroupBox;
+use gpui_kit::component::form::{Field, Form};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, Disableable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::fields::{AuthFields, Choice, Text, picked};
+use super::fields::{AuthFields, Choice, Text};
 use super::{ConfigView, Outcome};
 
-const LABEL_WIDTH: f32 = 150.;
 const SAVED: &str = "Saved and applied.";
 
 impl Render for ConfigView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mode = picked(&self.fields.mode, cx);
+        let mode = self.fields.mode.name(cx);
+        let mode = mode.as_str();
         let gated = mode == "upstream" || mode == "pac";
-        let form = v_flex()
-            .gap_4()
-            .p_4()
+        let sections = v_flex()
+            .px_6()
+            .pb_6()
+            .gap_8()
+            .max_w(rems(44.))
             .child(self.listen())
-            .child(self.routing())
+            .child(self.routing(mode))
             .when(mode == "upstream", |this| this.child(self.upstream(cx)))
             .when(mode == "pac", |this| this.child(self.pac(cx)))
             .when(gated, |this| this.child(self.corp_network(cx)))
             .child(self.logging());
         v_flex()
             .size_full()
-            .child(div().flex_1().min_h_0().overflow_y_scrollbar().child(form))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .child(sections),
+            )
             .child(self.actions(cx))
     }
 }
@@ -41,174 +49,231 @@ impl Render for ConfigView {
 impl ConfigView {
     fn listen(&self) -> impl IntoElement {
         let f = &self.fields;
-        section("Listen")
-            .child(text_row("Host", "listen-host", &f.listen_host))
-            .child(short_row("Port", "listen-port", &f.listen_port))
-            .child(note("A listen change takes effect after a restart."))
+        section(
+            "Proxy address",
+            "Where browsers and apps reach Zicade. Takes effect after a restart.",
+        )
+        .child(
+            form()
+                .child(field("Host").child(text("listen-host", "Host", &f.listen_host)))
+                .child(field("Port").child(short("listen-port", "Port", &f.listen_port))),
+        )
     }
 
-    fn routing(&self) -> impl IntoElement {
-        section("Routing").child(choice_row("Mode", "routing-mode", &self.fields.mode))
+    fn routing(&self, mode: &str) -> impl IntoElement {
+        let help = match mode {
+            "upstream" => "Every request goes through one upstream proxy.",
+            "pac" => "A PAC script picks the route for each request.",
+            _ => "Requests go straight to the sites they ask for.",
+        };
+        section("Routing", "How requests leave this machine.").child(
+            form().child(
+                field("Mode")
+                    .description(help)
+                    .child(choice("routing-mode", &self.fields.mode)),
+            ),
+        )
     }
 
     fn upstream(&self, cx: &App) -> impl IntoElement {
         let f = &self.fields;
-        section("Upstream proxy")
-            .child(text_row("Host", "upstream-host", &f.upstream_host))
-            .child(short_row("Port", "upstream-port", &f.upstream_port))
-            .children(auth_rows("upstream", &f.upstream_auth, cx))
+        section("Upstream proxy", "The proxy every request is sent through.").child(
+            form()
+                .child(field("Host").child(text("upstream-host", "Host", &f.upstream_host)))
+                .child(field("Port").child(short("upstream-port", "Port", &f.upstream_port)))
+                .children(auth_fields("upstream", &f.upstream_auth, cx)),
+        )
     }
 
     fn pac(&self, cx: &App) -> impl IntoElement {
         let f = &self.fields;
-        let source = picked(&f.pac_source, cx);
-        section("PAC")
-            .child(choice_row("Source", "pac-source", &f.pac_source))
-            .when(source == "file", |this| {
-                this.child(text_row("File path", "pac-path", &f.pac_path))
-            })
-            .when(source == "url", |this| {
-                this.child(text_row("URL", "pac-url", &f.pac_url))
-            })
-            .child(choice_row(
-                "If PAC fails",
-                "pac-fail-policy",
-                &f.pac_fail_policy,
-            ))
-            .child(note("Auth for the proxies the PAC script picks:"))
-            .children(auth_rows("pac", &f.pac_auth, cx))
+        let source = f.pac_source.name(cx);
+        let source = source.as_str();
+        let source_help = match source {
+            "file" => "Read the script from a file on this machine.",
+            "url" => "Download the script from a web address.",
+            _ => "Find the script the way Windows does (WPAD and system settings).",
+        };
+        section(
+            "PAC script",
+            "Authentication applies to the proxies the script picks.",
+        )
+        .child(
+            form()
+                .child(
+                    field("Source")
+                        .description(source_help)
+                        .child(choice("pac-source", &f.pac_source)),
+                )
+                .child(field("File").visible(source == "file").child(text(
+                    "pac-path",
+                    "File",
+                    &f.pac_path,
+                )))
+                .child(
+                    field("Address")
+                        .visible(source == "url")
+                        .child(text("pac-url", "Address", &f.pac_url)),
+                )
+                .child(
+                    field("If the script fails")
+                        .child(choice("pac-fail-policy", &f.pac_fail_policy)),
+                )
+                .children(auth_fields("pac", &f.pac_auth, cx)),
+        )
     }
 
     fn corp_network(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let f = &self.fields;
         let switch = Switch::new("corp-enabled")
             .checked(self.corp_enabled)
-            .label("Use the routing above only on the corporate network")
+            .label("Only on the corporate network")
             .on_click(cx.listener(|this, on: &bool, _, cx| {
                 this.corp_enabled = *on;
                 cx.notify();
             }));
-        section("Corporate network")
-            .child(switch)
-            .when(self.corp_enabled, |this| {
-                this.child(text_row("DNS suffixes", "corp-suffixes", &f.corp_suffixes))
-                    .child(short_row(
-                        "Re-check every (s)",
-                        "corp-poll-seconds",
-                        &f.corp_poll_seconds,
-                    ))
-                    .child(note(
-                        "Off the corporate network, requests go direct. Separate suffixes with commas.",
-                    ))
-            })
+        section(
+            "Corporate network",
+            "Off the corporate network, requests go directly instead.",
+        )
+        .child(
+            form()
+                .child(Field::new().label_indent(true).child(switch))
+                .child(
+                    field("DNS suffixes")
+                        .visible(self.corp_enabled)
+                        .description("Separate several with commas.")
+                        .child(text("corp-suffixes", "DNS suffixes", &f.corp_suffixes)),
+                )
+                .child(
+                    field("Check every")
+                        .visible(self.corp_enabled)
+                        .description("Seconds between checks, besides network-change events.")
+                        .child(short(
+                            "corp-poll-seconds",
+                            "Check every",
+                            &f.corp_poll_seconds,
+                        )),
+                ),
+        )
     }
 
     fn logging(&self) -> impl IntoElement {
         let f = &self.fields;
-        section("Logging")
-            .child(choice_row("Level", "log-level", &f.log_level))
-            .child(choice_row("Format", "log-format", &f.log_format))
+        section("Logging", "Applies to the Logs page and the console.").child(
+            form()
+                .child(field("Level").child(choice("log-level", &f.log_level)))
+                .child(field("Format").child(choice("log-format", &f.log_format))),
+        )
     }
 
     fn actions(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let changed = self.has_changes(cx);
         let theme = cx.theme();
-        let outcome = match &self.outcome {
-            Some(Outcome::Saved) => Some((SharedString::from(SAVED), theme.success)),
-            Some(Outcome::Failed(reason)) => Some((reason.clone(), theme.danger)),
-            None => None,
+        let (status, color) = match (&self.outcome, self.saving, changed) {
+            (_, true, _) => (SharedString::from("Saving…"), theme.muted_foreground),
+            (Some(Outcome::Failed(reason)), _, _) => (reason.clone(), theme.danger),
+            (_, _, true) => ("Unsaved changes".into(), theme.muted_foreground),
+            (Some(Outcome::Saved), _, false) => (SAVED.into(), theme.success),
+            (None, _, false) => (SharedString::default(), theme.muted_foreground),
         };
-        let outcome = outcome.map(|(text, color)| {
-            div()
-                .id("save-outcome")
-                .test_support()
-                .role(Role::Status)
-                .aria_label(text.clone())
-                .text_color(color)
-                .child(text)
-        });
         h_flex()
             .w_full()
-            .px_4()
+            .px_6()
             .py_3()
-            .gap_3()
+            .gap_2()
             .border_t_1()
             .border_color(theme.border)
             .child(
-                Button::new("save")
-                    .primary()
-                    .label("Save")
-                    .loading(self.saving)
-                    .disabled(self.saving)
-                    .on_click(
-                        cx.listener(|this, _: &ClickEvent, window, cx| this.save(window, cx)),
-                    ),
+                div()
+                    .id("save-outcome")
+                    .test_support()
+                    .role(Role::Status)
+                    .aria_label(status.clone())
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .text_color(color)
+                    .child(status),
             )
             .child(
                 Button::new("reload")
-                    .ghost()
+                    .outline()
                     .label("Discard changes")
-                    .disabled(self.saving)
+                    .disabled(self.saving || !changed)
                     .on_click(
                         cx.listener(|this, _: &ClickEvent, window, cx| this.reload(window, cx)),
                     ),
             )
-            .child(div().flex_1().text_sm().children(outcome))
+            .child(
+                Button::new("save")
+                    .primary()
+                    .label("Save")
+                    .tooltip("Save (Ctrl+S)")
+                    .loading(self.saving)
+                    .disabled(self.saving || !changed)
+                    .on_click(
+                        cx.listener(|this, _: &ClickEvent, window, cx| this.save(window, cx)),
+                    ),
+            )
     }
 }
 
-/// The username/password or SSPI-package rows the picked auth mode needs.
-/// `slot` keeps the upstream and PAC copies of these rows apart.
-fn auth_rows(slot: &'static str, auth: &AuthFields, cx: &App) -> Vec<AnyElement> {
+/// The username/password or SSPI-package fields the picked auth mode needs.
+/// `slot` keeps the upstream and PAC copies of these fields apart.
+fn auth_fields(slot: &'static str, auth: &AuthFields, cx: &App) -> Vec<Field> {
     let id = |name: &str| SharedString::from(format!("{slot}-{name}"));
-    let mut rows = vec![choice_row("Authentication", id("auth"), &auth.mode).into_any_element()];
-    match picked(&auth.mode, cx) {
-        "basic" => {
-            rows.push(text_row("Username", id("username"), &auth.username).into_any_element());
-            let password = Input::new(&auth.password)
-                .id(id("password"))
-                .aria_label("Password")
-                .mask_toggle();
-            rows.push(row("Password", password).into_any_element());
-        }
-        "negotiate" => {
-            rows.push(choice_row("SSPI package", id("package"), &auth.package).into_any_element());
-            rows.push(
-                note("Uses the signed-in Windows account; no password is stored.")
-                    .into_any_element(),
-            );
-        }
-        _ => {}
-    }
-    rows
+    let mode = auth.mode.name(cx);
+    let mode = mode.as_str();
+    vec![
+        field("Authentication").child(choice(id("auth"), &auth.mode)),
+        field("SSPI package")
+            .visible(mode == "negotiate")
+            .description("Uses the signed-in Windows account; no password is stored.")
+            .child(choice(id("package"), &auth.package)),
+        field("Username").visible(mode == "basic").child(text(
+            id("username"),
+            "Username",
+            &auth.username,
+        )),
+        field("Password")
+            .visible(mode == "basic")
+            .description("Saved passwords are never shown. Leave blank to keep it.")
+            .child(
+                Input::new(&auth.password)
+                    .id(id("password"))
+                    .aria_label("Password")
+                    .mask_toggle(),
+            ),
+    ]
 }
 
-fn section(title: &'static str) -> GroupBox {
-    GroupBox::new().title(div().font_weight(FontWeight::SEMIBOLD).child(title))
+fn section(title: &'static str, description: &'static str) -> Div {
+    v_flex().gap_3().child(
+        v_flex()
+            .gap_0p5()
+            .child(div().text_base().font_semibold().child(title))
+            .child(div().text_sm().opacity(0.7).child(description)),
+    )
 }
 
-fn row(label: &'static str, input: impl IntoElement) -> impl IntoElement {
-    v_form()
-        .label_width(px(LABEL_WIDTH))
-        .child(field().label(label).child(input))
+fn form() -> Form {
+    Form::new().label_layout(Axis::Horizontal)
 }
 
-fn text_row(label: &'static str, id: impl Into<ElementId>, input: &Text) -> AnyElement {
-    row(label, Input::new(input).id(id).aria_label(label)).into_any_element()
+fn field(label: &'static str) -> Field {
+    Field::new().label(label)
+}
+
+fn text(id: impl Into<ElementId>, label: &'static str, input: &Text) -> Input {
+    Input::new(input).id(id).aria_label(label)
 }
 
 /// A narrow text field, for ports and seconds.
-fn short_row(label: &'static str, id: impl Into<ElementId>, input: &Text) -> AnyElement {
-    row(
-        label,
-        Input::new(input).id(id).aria_label(label).w(px(120.)),
-    )
-    .into_any_element()
+fn short(id: impl Into<ElementId>, label: &'static str, input: &Text) -> Input {
+    Input::new(input).id(id).aria_label(label).w_32()
 }
 
-fn choice_row(label: &'static str, id: impl Into<ElementId>, select: &Choice) -> AnyElement {
-    row(label, Select::new(select).id(id).w(px(220.))).into_any_element()
-}
-
-fn note(text: &'static str) -> impl IntoElement {
-    div().text_xs().opacity(0.7).child(text)
+fn choice(id: impl Into<ElementId>, select: &Choice) -> Select<Vec<&'static str>> {
+    Select::new(&select.state).id(id).w_56()
 }

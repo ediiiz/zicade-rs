@@ -226,27 +226,39 @@ toggling it while it is already running takes effect immediately.
 
 ## The window
 
-A native window (gpui-kit; follows the system light/dark theme) with four pages:
+A native window (gpui-kit; follows the system light/dark theme) with a
+sidebar of four pages. Ctrl+1 to Ctrl+4 switch pages and Ctrl+S saves settings.
 
-- **Status**: routing mode, corporate-network on-corp state (when the gate is
-  enabled), listen address, total and failed requests (plain HTTP and `CONNECT`
-  tunnels alike), open client connections, bytes sent and received, and the
-  current in/out throughput with a 60-second chart, refreshed once a second.
-  Bytes are counted as they are relayed (each tunnel chunk and each HTTP body
-  frame), so a long download moves the chart while it runs.
-- **Configuration**: every config field (listen, routing mode, upstream + its
-  auth, PAC + its auth, corporate-network detection, logging); the
-  upstream/PAC/corp-network sections show for the routing mode that uses them.
-  Saving validates, writes the config file, and applies routing/auth edits to
-  the running proxy without a restart; a listen host/port change still needs a
-  restart. Stored passwords are never shown: leave a password blank to keep the
-  saved one.
-- **Logs**: the live log stream, starting with the buffered backlog.
-- **Connections**: every request and tunnel in flight, then the last 200
-  finished ones: state (connecting, open, closed, or failed with the reason),
-  kind (`HTTPS` tunnel or `GET 200`-style request), target, route (`direct` or
-  the upstream proxy actually used, including the PAC script's choice), age,
-  bytes each way, and the live rate of open connections.
+- **Overview** (Ctrl+1): whether the proxy is running and how it routes, in
+  words ("Routing each request with the PAC script, on the corporate
+  network"), the proxy address with a copy button, live in/out throughput with
+  a 60-second chart, totals (requests, failures, client connections, bytes
+  received and sent), and what is in flight right now. Requests count plain
+  HTTP and `CONNECT` tunnels alike. Bytes are counted as they are relayed (each
+  tunnel chunk and each HTTP body frame), so a long download moves the chart
+  while it runs.
+- **Connections** (Ctrl+2): every request and tunnel in flight, then the last
+  200 finished ones, filterable (all, open, failed) and searchable by host or
+  route: state (connecting, open, closed, or failed with the reason), kind
+  (`HTTPS` tunnel or `GET 200`-style request), target, route (`direct` or the
+  upstream proxy actually used, including the PAC script's choice), age, bytes
+  each way, and the live rate of open connections.
+- **Logs** (Ctrl+3): the live log stream, starting with the buffered backlog,
+  filterable by level and text; following new lines can be switched off to
+  read back.
+- **Settings** (Ctrl+4): every config field (proxy address, routing mode,
+  upstream and its auth, PAC script and its auth, corporate-network detection,
+  logging), showing only the sections the routing mode uses. Save is enabled
+  once something changed; it validates, writes the config file, and applies
+  routing/auth edits to the running proxy without a restart (a proxy address
+  change still needs a restart). Stored passwords are never shown: leave a
+  password blank to keep the saved one.
+
+To look at the window with sample data and no running proxy:
+
+```sh
+cargo run -p zicade-ui --example preview -- [overview|connections|logs|settings] [light|dark]
+```
 
 The window talks to the proxy in-process; nothing listens besides the proxy.
 Configs from older versions with a `web` section still load; the section is

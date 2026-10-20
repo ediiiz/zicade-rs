@@ -25,7 +25,7 @@ fn the_connections_page_lists_open_and_failed_connections(cx: &mut TestAppContex
 
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.within("pages").click(3usize, cx);
+        window.press("ctrl-2", cx);
         assert_eq!(
             label(window, ("connection", 2usize)).as_deref(),
             Some("Open, HTTPS example.com:443 via direct, up 1.0 KB, down 2.0 KB")
@@ -50,7 +50,7 @@ async fn new_connections_and_bytes_show_up_without_reopening(cx: &mut TestAppCon
     let handle = open(Ok(f.control.clone()), cx);
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.within("pages").click(3usize, cx);
+        window.press("ctrl-2", cx);
     })
     .unwrap();
 
@@ -66,7 +66,7 @@ async fn new_connections_and_bytes_show_up_without_reopening(cx: &mut TestAppCon
     })
     .await;
     cx.update_window(handle, |_, window, cx| {
-        window.within("pages").click(0usize, cx);
+        window.press("ctrl-1", cx);
     })
     .unwrap();
     cx.wait_for(handle, WAIT, |window, _| {

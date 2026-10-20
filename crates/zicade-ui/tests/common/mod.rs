@@ -18,7 +18,7 @@ use zicade_control::{
     StatusSnapshot,
 };
 use zicade_observe::{LogEvent, LogStore, channel_layer};
-use zicade_ui::MainView;
+use zicade_ui::{MainView, bind_keys};
 
 pub const WAIT: Duration = Duration::from_secs(5);
 
@@ -135,7 +135,10 @@ pub fn log(seq: u64, message: &str) -> LogEvent {
 }
 
 pub fn open(control: Result<Control, String>, cx: &mut TestAppContext) -> AnyWindowHandle {
-    cx.update(init);
+    cx.update(|cx| {
+        init(cx);
+        bind_keys(cx);
+    });
     cx.update(|cx| {
         let bounds = Bounds {
             origin: Point::default(),

@@ -16,12 +16,13 @@ pub(crate) fn run(launch: Launch) {
         commands,
     } = launch;
     application()
-        .with_assets(assets::Assets)
+        .with_assets(crate::assets::Assets)
         // The default on Windows quits when the last window closes, which
         // would take the tray app down with the window.
         .with_quit_mode(QuitMode::Explicit)
         .run(move |cx: &mut App| {
             init(cx);
+            crate::views::bind_keys(cx);
             let mut main = MainWindow::new(control);
             if show_window {
                 main.show(cx);
@@ -87,12 +88,14 @@ impl MainWindow {
                 title: Some("Zicade".into()),
                 ..Default::default()
             }),
+            // Window geometry is platform-facing, so it is in pixels. The
+            // minimum keeps the sidebar plus every Connections column usable.
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
-                size(px(980.), px(720.)),
+                size(px(1100.), px(760.)),
                 cx,
             ))),
-            window_min_size: Some(size(px(640.), px(480.))),
+            window_min_size: Some(size(px(880.), px(560.))),
             ..Default::default()
         };
         let control = self.control.clone();

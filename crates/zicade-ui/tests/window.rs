@@ -17,7 +17,10 @@ fn the_status_page_shows_the_running_proxy(cx: &mut TestAppContext) {
 
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        assert_eq!(label(window, "stat-routing").as_deref(), Some("direct"));
+        assert_eq!(
+            label(window, "stat-routing").as_deref(),
+            Some("Connecting to sites directly")
+        );
         assert_eq!(
             label(window, "stat-listen").as_deref(),
             Some("127.0.0.1:3229")
@@ -35,7 +38,7 @@ async fn a_saved_edit_is_validated_written_and_applied(cx: &mut TestAppContext) 
 
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.within("pages").click(1usize, cx);
+        window.press("ctrl-4", cx);
         // direct -> upstream: the second option.
         window.within("routing-mode").click("input", cx);
         window.press("down", cx);
@@ -85,7 +88,7 @@ fn an_unparseable_field_is_reported_and_nothing_is_saved(cx: &mut TestAppContext
 
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.within("pages").click(1usize, cx);
+        window.press("ctrl-4", cx);
         window.click("listen-port", cx);
         window.input("x", cx);
         window.click("save", cx);
@@ -108,7 +111,7 @@ async fn the_logs_page_shows_the_backlog_then_live_lines(cx: &mut TestAppContext
 
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.within("pages").click(2usize, cx);
+        window.press("ctrl-3", cx);
     })
     .unwrap();
     f.logs.push(log(0, "arrived while watching"));
@@ -137,7 +140,10 @@ fn a_failed_start_shows_why_instead_of_the_pages(cx: &mut TestAppContext) {
             label(window, "start-error").as_deref(),
             Some("failed to bind the proxy listener")
         );
-        assert!(window.try_find("pages").is_none());
+        assert!(
+            window.try_find("nav").is_none(),
+            "no navigation without a proxy"
+        );
     })
     .unwrap();
 }

@@ -1,20 +1,52 @@
 //! The form's widget state, and the copy to and from a [`ConfigForm`].
 
 use gpui_kit::component::IndexPath;
-use gpui_kit::component::input::InputState;
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::choices::{
-    AUTH_MODES, FAIL_POLICIES, LOG_FORMATS, LOG_LEVELS, PAC_SOURCES, ROUTING_MODES, SSPI_PACKAGES,
-    index_of, name_of, parse,
+    AUTH_MODES, FAIL_POLICIES, Item, LOG_FORMATS, LOG_LEVELS, PAC_SOURCES, ROUTING_MODES,
+    SSPI_PACKAGES, index_of, labels, name_of, parse,
 };
 use crate::form_model::{AuthForm, ConfigForm};
 
-pub(super) type Choice = Entity<SelectState<Vec<&'static str>>>;
 pub(super) type Text = Entity<InputState>;
+
+/// A drop-down: readable labels on screen, config-file names underneath.
+pub(super) struct Choice {
+    pub state: Entity<SelectState<Vec<&'static str>>>,
+    options: &'static [Item],
+    /// A value from the config the list does not offer (a hand edit). It is
+    /// kept, not blanked, until the user picks something else.
+    unlisted: Option<String>,
+}
+
+impl Choice {
+    /// The picked option's config-file name.
+    pub fn name(&self, cx: &App) -> String {
+        let picked = self
+            .state
+            .read(cx)
+            .selected_index(cx)
+            .and_then(|index| self.options.get(index.row));
+        match (picked, &self.unlisted) {
+            (Some(item), _) => item.name.to_owned(),
+            (None, Some(unlisted)) => unlisted.clone(),
+            (None, None) => String::new(),
+        }
+    }
+
+    fn pick(&mut self, name: &str, window: &mut Window, cx: &mut App) {
+        let index = index_of(self.options, name);
+        self.unlisted = index.is_none().then(|| name.to_owned());
+        self.state.update(cx, |state, cx| {
+            state.set_selected_index(index.map(IndexPath::new), window, cx);
+        });
+    }
+}
 
 /// One auth slot's widgets.
 pub(super) struct AuthFields {
@@ -43,8 +75,9 @@ pub(super) struct Fields {
     pub log_format: Choice,
 }
 
-/// Builds widgets on a view and re-renders it when a choice changes, since
-/// choices decide which sections show.
+/// Builds widgets on a view and re-renders it on every edit: choices decide
+/// which sections show, and any edit can change whether there is anything to
+/// save.
 pub(super) struct Builder<'a, 'b, V: 'static> {
     pub window: &'a mut Window,
     pub cx: &'a mut Context<'b, V>,
@@ -54,33 +87,52 @@ pub(super) struct Builder<'a, 'b, V: 'static> {
 impl<V: 'static> Builder<'_, '_, V> {
     fn text(&mut self, value: &str, placeholder: &str) -> Text {
         let (value, placeholder) = (value.to_owned(), placeholder.to_owned());
-        self.cx.new(|cx| {
+        let input = self.cx.new(|cx| {
             InputState::new(self.window, cx)
                 .placeholder(placeholder)
                 .default_value(value)
-        })
+        });
+        self.watch(&input);
+        input
     }
 
     fn secret(&mut self) -> Text {
-        self.cx.new(|cx| {
+        let input = self.cx.new(|cx| {
             InputState::new(self.window, cx)
                 .placeholder("Leave blank to keep the saved password")
                 .masked(true)
-        })
+        });
+        self.watch(&input);
+        input
     }
 
-    fn choice(&mut self, options: &'static [&'static str], selected: &str) -> Choice {
-        let index = index_of(options, selected).map(IndexPath::new);
-        let select = self
+    fn watch(&mut self, input: &Text) {
+        let sub = self
             .cx
-            .new(|cx| SelectState::new(options.to_vec(), index, self.window, cx));
+            .subscribe_in(input, self.window, |_, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            });
+        self.subscriptions.push(sub);
+    }
+
+    fn choice(&mut self, options: &'static [Item], selected: &str) -> Choice {
+        let index = index_of(options, selected);
+        let state = self.cx.new(|cx| {
+            SelectState::new(labels(options), index.map(IndexPath::new), self.window, cx)
+        });
         let sub = self.cx.subscribe_in(
-            &select,
+            &state,
             self.window,
             |_, _, _: &SelectEvent<Vec<&'static str>>, _, cx| cx.notify(),
         );
         self.subscriptions.push(sub);
-        select
+        Choice {
+            state,
+            options,
+            unlisted: index.is_none().then(|| selected.to_owned()),
+        }
     }
 
     fn auth(&mut self, auth: &AuthForm) -> AuthFields {
@@ -113,14 +165,9 @@ impl<V: 'static> Builder<'_, '_, V> {
     }
 }
 
-/// The option currently picked in `choice`, as a config-file name.
-pub(super) fn picked(choice: &Choice, cx: &App) -> &'static str {
-    choice.read(cx).selected_value().copied().unwrap_or("")
-}
-
 /// The enum the picked option names, or its default when nothing is picked.
 fn picked_enum<T: DeserializeOwned + Default>(choice: &Choice, cx: &App) -> T {
-    parse(picked(choice, cx)).unwrap_or_default()
+    parse(&choice.name(cx)).unwrap_or_default()
 }
 
 fn text(input: &Text, cx: &App) -> String {
@@ -137,9 +184,9 @@ impl AuthFields {
         }
     }
 
-    fn load(&self, auth: &AuthForm, window: &mut Window, cx: &mut App) {
-        select(&self.mode, &AUTH_MODES, &auth.mode, window, cx);
-        select(&self.package, &SSPI_PACKAGES, &auth.package, window, cx);
+    fn load(&mut self, auth: &AuthForm, window: &mut Window, cx: &mut App) {
+        select(&mut self.mode, &auth.mode, window, cx);
+        select(&mut self.package, &auth.package, window, cx);
         set(&self.username, &auth.username, window, cx);
         set(&self.password, "", window, cx);
     }
@@ -164,34 +211,28 @@ impl Fields {
             corp_enabled,
             corp_suffixes: text(&self.corp_suffixes, cx),
             corp_poll_seconds: text(&self.corp_poll_seconds, cx),
-            log_level: picked(&self.log_level, cx).to_owned(),
-            log_format: picked(&self.log_format, cx).to_owned(),
+            log_level: self.log_level.name(cx),
+            log_format: self.log_format.name(cx),
         }
     }
 
     /// Put `form` on screen; password fields are always cleared.
-    pub fn load(&self, form: &ConfigForm, window: &mut Window, cx: &mut App) {
+    pub fn load(&mut self, form: &ConfigForm, window: &mut Window, cx: &mut App) {
         set(&self.listen_host, &form.listen_host, window, cx);
         set(&self.listen_port, &form.listen_port, window, cx);
-        select(&self.mode, &ROUTING_MODES, &form.mode, window, cx);
+        select(&mut self.mode, &form.mode, window, cx);
         set(&self.upstream_host, &form.upstream_host, window, cx);
         set(&self.upstream_port, &form.upstream_port, window, cx);
         self.upstream_auth.load(&form.upstream_auth, window, cx);
-        select(&self.pac_source, &PAC_SOURCES, &form.pac_source, window, cx);
+        select(&mut self.pac_source, &form.pac_source, window, cx);
         set(&self.pac_path, &form.pac_path, window, cx);
         set(&self.pac_url, &form.pac_url, window, cx);
-        select(
-            &self.pac_fail_policy,
-            &FAIL_POLICIES,
-            &form.pac_fail_policy,
-            window,
-            cx,
-        );
+        select(&mut self.pac_fail_policy, &form.pac_fail_policy, window, cx);
         self.pac_auth.load(&form.pac_auth, window, cx);
         set(&self.corp_suffixes, &form.corp_suffixes, window, cx);
         set(&self.corp_poll_seconds, &form.corp_poll_seconds, window, cx);
-        select_name(&self.log_level, &LOG_LEVELS, &form.log_level, window, cx);
-        select_name(&self.log_format, &LOG_FORMATS, &form.log_format, window, cx);
+        self.log_level.pick(&form.log_level, window, cx);
+        self.log_format.pick(&form.log_format, window, cx);
     }
 }
 
@@ -200,17 +241,6 @@ fn set(input: &Text, value: &str, window: &mut Window, cx: &mut App) {
     input.update(cx, |state, cx| state.set_value(value, window, cx));
 }
 
-fn select<T: Serialize>(
-    choice: &Choice,
-    options: &[&str],
-    value: &T,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    select_name(choice, options, &name_of(value), window, cx);
-}
-
-fn select_name(choice: &Choice, options: &[&str], name: &str, window: &mut Window, cx: &mut App) {
-    let index = index_of(options, name).map(IndexPath::new);
-    choice.update(cx, |state, cx| state.set_selected_index(index, window, cx));
+fn select<T: Serialize>(choice: &mut Choice, value: &T, window: &mut Window, cx: &mut App) {
+    choice.pick(&name_of(value), window, cx);
 }

@@ -4,8 +4,10 @@
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::tab::TabBar;
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use zicade_control::{ConnectionKind, ConnectionSnapshot, ConnectionState, Control};
@@ -14,32 +16,48 @@ use crate::connection_rates::ConnectionRates;
 use crate::throughput::{format_bytes, format_bytes_per_sec, format_duration};
 
 const REFRESH: Duration = Duration::from_secs(1);
-const ROW_HEIGHT: f32 = 26.;
 
-/// Column widths; the target column takes the rest.
-const STATE_W: f32 = 120.;
-const KIND_W: f32 = 90.;
-const ROUTE_W: f32 = 170.;
-const TIME_W: f32 = 70.;
-const BYTES_W: f32 = 80.;
-const RATE_W: f32 = 170.;
+/// Which connections the list shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Filter {
+    All,
+    Open,
+    Failed,
+}
+
+const FILTERS: [(Filter, &str); 3] = [
+    (Filter::All, "All"),
+    (Filter::Open, "Open"),
+    (Filter::Failed, "Failed"),
+];
 
 pub(crate) struct ConnectionsView {
     control: Control,
     all: Vec<ConnectionSnapshot>,
     rates: ConnectionRates,
     started: Instant,
-    show_finished: bool,
+    filter: Filter,
+    search: Entity<InputState>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl ConnectionsView {
-    pub(crate) fn new(control: Control, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(control: Control, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Filter by host or route"));
+        let refilter = cx.subscribe_in(&search, window, |_, _, event: &InputEvent, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        });
         let mut view = Self {
             control,
             all: Vec::new(),
             rates: ConnectionRates::default(),
             started: Instant::now(),
-            show_finished: true,
+            filter: Filter::All,
+            search,
+            _subscriptions: vec![refilter],
         };
         view.refresh();
         cx.spawn(async move |this, cx| {
@@ -63,10 +81,20 @@ impl ConnectionsView {
         self.rates.update(&self.all, self.started.elapsed());
     }
 
-    fn shown(&self) -> Vec<&ConnectionSnapshot> {
+    fn shown(&self, cx: &App) -> Vec<&ConnectionSnapshot> {
+        let needle = self.search.read(cx).value().trim().to_lowercase();
         self.all
             .iter()
-            .filter(|c| self.show_finished || is_live(c))
+            .filter(|c| match self.filter {
+                Filter::All => true,
+                Filter::Open => is_live(c),
+                Filter::Failed => matches!(c.state, ConnectionState::Failed(_)),
+            })
+            .filter(|c| {
+                needle.is_empty()
+                    || c.target.to_lowercase().contains(&needle)
+                    || c.route.to_lowercase().contains(&needle)
+            })
             .collect()
     }
 
@@ -77,50 +105,76 @@ impl ConnectionsView {
             failed: theme.danger,
             muted: theme.muted_foreground,
             normal: theme.foreground,
-            stripe: theme.list_even,
+            border: theme.border,
         };
-        self.shown()
+        let shown = self.shown(cx);
+        shown
             .into_iter()
-            .enumerate()
             .skip(range.start)
             .take(range.len())
-            .map(|(index, c)| row(c, self.rates.rate(c.id), index, &colors))
+            .map(|c| row(c, self.rates.rate(c.id), &colors))
             .collect()
     }
-}
 
-impl Render for ConnectionsView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let open = self.all.iter().filter(|c| is_live(c)).count();
         let summary = format!("{open} open, {} finished", self.all.len() - open);
-        let count = self.shown().len();
-        let header = h_flex()
-            .gap_4()
+        let selected = FILTERS
+            .iter()
+            .position(|(filter, _)| *filter == self.filter)
+            .unwrap_or(0);
+        h_flex()
+            .px_6()
+            .pb_3()
+            .gap_3()
+            .child(
+                TabBar::new("connection-filter")
+                    .segmented()
+                    .small()
+                    .selected_index(selected)
+                    .children(FILTERS.map(|(_, label)| label))
+                    .on_click(cx.listener(|this, index: &usize, _, cx| {
+                        this.filter = FILTERS.get(*index).map_or(Filter::All, |(f, _)| *f);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Input::new(&self.search)
+                    .id("connection-search")
+                    .small()
+                    .w_64()
+                    .prefix(Icon::new(IconName::Search).small())
+                    .cleanable(true),
+            )
+            .child(div().flex_1())
             .child(
                 div()
                     .id("connection-summary")
                     .test_support()
                     .aria_label(summary.clone())
                     .text_sm()
-                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
                     .child(summary),
             )
-            .child(div().flex_1())
-            .child(
-                Switch::new("show-finished")
-                    .checked(self.show_finished)
-                    .label("Show finished")
-                    .on_click(cx.listener(|this, on: &bool, _, cx| {
-                        this.show_finished = *on;
-                        cx.notify();
-                    })),
-            );
+    }
+}
+
+impl Render for ConnectionsView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let count = self.shown(cx).len();
+        let muted = cx.theme().muted_foreground;
         let body = if count == 0 {
+            let message = if self.all.is_empty() {
+                "No connections yet. Point a browser or app at the proxy address to see them here."
+            } else {
+                "No connections match."
+            };
             div()
-                .p_4()
+                .px_6()
+                .py_8()
                 .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child("No connections yet. Point a browser or app at the proxy to see them here.")
+                .text_color(muted)
+                .child(message)
                 .into_any_element()
         } else {
             uniform_list(
@@ -133,11 +187,8 @@ impl Render for ConnectionsView {
         };
         v_flex()
             .size_full()
-            .px_4()
-            .py_3()
-            .gap_2()
-            .child(header)
-            .child(column_titles(cx.theme().muted_foreground))
+            .child(self.toolbar(cx))
+            .child(header(muted, cx.theme().border))
             .child(div().flex_1().min_h_0().child(body))
     }
 }
@@ -147,96 +198,127 @@ struct Colors {
     failed: Hsla,
     muted: Hsla,
     normal: Hsla,
-    stripe: Hsla,
+    border: Hsla,
 }
 
 fn is_live(c: &ConnectionSnapshot) -> bool {
     matches!(c.state, ConnectionState::Connecting | ConnectionState::Open)
 }
 
-fn column_titles(color: Hsla) -> impl IntoElement {
+/// The fixed lanes every row shares, so columns line up from header to last
+/// row; the target lane takes the rest.
+fn lanes(
+    state: impl IntoElement,
+    kind: impl IntoElement,
+    target: impl IntoElement,
+    route: impl IntoElement,
+    numbers: [AnyElement; 4],
+) -> Div {
+    let [time, sent, received, now] = numbers;
     h_flex()
-        .px_2()
+        .w_full()
+        .px_6()
         .gap_2()
-        .text_xs()
-        .text_color(color)
-        .child(cell(STATE_W, "State"))
-        .child(cell(KIND_W, "Kind"))
-        .child(div().flex_1().child("Target"))
-        .child(cell(ROUTE_W, "Route"))
-        .child(cell(TIME_W, "Time"))
-        .child(cell(BYTES_W, "↑ Sent"))
-        .child(cell(BYTES_W, "↓ Received"))
-        .child(cell(RATE_W, "Now"))
+        .child(div().w_24().flex_none().child(state))
+        .child(div().w_16().flex_none().child(kind))
+        .child(div().flex_1().min_w_0().child(target))
+        .child(div().w_24().flex_none().truncate().child(route))
+        .child(div().w_16().flex_none().text_right().child(time))
+        .child(div().w_16().flex_none().text_right().child(sent))
+        .child(div().w_16().flex_none().text_right().child(received))
+        .child(div().w_24().flex_none().text_right().child(now))
 }
 
-fn cell(width: f32, text: impl Into<SharedString>) -> Div {
-    div().w(px(width)).flex_none().truncate().child(text.into())
+fn header(muted: Hsla, border: Hsla) -> impl IntoElement {
+    let number = |text: &'static str| div().child(text).into_any_element();
+    lanes(
+        "State",
+        "Kind",
+        "Target",
+        "Route",
+        [
+            number("Time"),
+            number("Sent"),
+            number("Received"),
+            number("Now"),
+        ],
+    )
+    .py_1p5()
+    .text_xs()
+    .text_color(muted)
+    .border_b_1()
+    .border_color(border)
 }
 
-fn row(
-    c: &ConnectionSnapshot,
-    rate: Option<(f64, f64)>,
-    index: usize,
-    colors: &Colors,
-) -> AnyElement {
+fn row(c: &ConnectionSnapshot, rate: Option<(f64, f64)>, colors: &Colors) -> AnyElement {
     let (state, state_color) = match &c.state {
         ConnectionState::Connecting => ("Connecting", colors.muted),
         ConnectionState::Open => ("Open", colors.open),
         ConnectionState::Closed => ("Closed", colors.muted),
         ConnectionState::Failed(_) => ("Failed", colors.failed),
     };
-    let reason = match &c.state {
+    // The live rate, download over upload, for connections still moving.
+    let now = match rate {
+        Some((up, down)) if is_live(c) => v_flex()
+            .text_xs()
+            .child(format!("↓ {}", format_bytes_per_sec(down)))
+            .child(format!("↑ {}", format_bytes_per_sec(up)))
+            .into_any_element(),
+        _ => div().into_any_element(),
+    };
+    // State is spelled out next to its dot: never color alone.
+    let state = h_flex()
+        .gap_1p5()
+        .child(div().size_1p5().flex_none().rounded_full().bg(state_color))
+        .child(state);
+    let target = v_flex()
+        .child(div().truncate().child(c.target.clone()))
+        .when_some(failure(c), |this, reason| {
+            this.child(
+                div()
+                    .text_xs()
+                    .truncate()
+                    .text_color(colors.failed)
+                    .child(reason),
+            )
+        });
+    let number = |text: String| div().child(text).into_any_element();
+    lanes(
+        state,
+        div().text_color(colors.muted).child(kind_label(&c.kind)),
+        target,
+        div().text_color(colors.muted).child(c.route.clone()),
+        [
+            number(format_duration(c.duration)),
+            number(format_bytes(c.bytes_up)),
+            number(format_bytes(c.bytes_down)),
+            now,
+        ],
+    )
+    .id(("connection", c.id as usize))
+    .test_support()
+    .aria_label(describe(c))
+    .h_10()
+    .text_sm()
+    .text_color(if is_live(c) {
+        colors.normal
+    } else {
+        colors.muted
+    })
+    .border_b_1()
+    .border_color(colors.border)
+    .into_any_element()
+}
+
+fn failure(c: &ConnectionSnapshot) -> Option<String> {
+    match &c.state {
         ConnectionState::Failed(reason) => Some(reason.clone()),
         _ => None,
-    };
-    let now = match rate {
-        Some((up, down)) if is_live(c) => {
-            format!(
-                "↓ {}  ↑ {}",
-                format_bytes_per_sec(down),
-                format_bytes_per_sec(up)
-            )
-        }
-        _ => String::new(),
-    };
-    let target = div()
-        .flex_1()
-        .min_w_0()
-        .truncate()
-        .child(c.target.clone())
-        .children(reason.clone().map(|reason| {
-            div()
-                .text_color(colors.failed)
-                .child(SharedString::from(format!(" — {reason}")))
-        }));
-    h_flex()
-        .id(("connection", c.id as usize))
-        .test_support()
-        .aria_label(describe(c))
-        .h(px(ROW_HEIGHT))
-        .px_2()
-        .gap_2()
-        .text_sm()
-        .text_color(if is_live(c) {
-            colors.normal
-        } else {
-            colors.muted
-        })
-        .when(index % 2 == 1, |this| this.bg(colors.stripe))
-        .child(cell(STATE_W, state).text_color(state_color))
-        .child(cell(KIND_W, kind_label(&c.kind)))
-        .child(h_flex().flex_1().min_w_0().child(target))
-        .child(cell(ROUTE_W, c.route.clone()))
-        .child(cell(TIME_W, format_duration(c.duration)))
-        .child(cell(BYTES_W, format_bytes(c.bytes_up)))
-        .child(cell(BYTES_W, format_bytes(c.bytes_down)))
-        .child(cell(RATE_W, now))
-        .into_any_element()
+    }
 }
 
 /// `HTTPS` for a tunnel, `GET 200` for a plain-HTTP request.
-fn kind_label(kind: &ConnectionKind) -> String {
+pub(super) fn kind_label(kind: &ConnectionKind) -> String {
     match kind {
         ConnectionKind::Tunnel => "HTTPS".to_owned(),
         ConnectionKind::Http {
