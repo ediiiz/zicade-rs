@@ -6,7 +6,8 @@ members = [
     "crates/zicade-auth",
     "crates/zicade-win",
     "crates/zicade-proxy",
-    "crates/zicade-web",
+    "crates/zicade-control",
+    "crates/zicade-ui",
     "crates/zicade-observe",
     "apps/zicade",
 ]
@@ -41,12 +42,10 @@ bytes = "1"
 socket2 = { version = "0.5", features = ["all"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
-axum = "0.8"
-tower = { version = "0.5", features = ["util"] }
-tokio-stream = { version = "0.1", features = ["sync", "time"] }
-futures-util = { version = "0.3", default-features = false }
-rust-embed = "8"
-rand = "0.9"
+# The native UI. Pinned exactly: gpui-kit pins a gpui snapshot and its API
+# still moves between minor releases.
+gpui-kit = "=0.7.3"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Single lint policy for the whole workspace. Each crate opts in with
 # `[lints] workspace = true`. `cargo clippy -- -D warnings` promotes every

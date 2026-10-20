@@ -1,23 +1,21 @@
-//! The started application: bind the proxy + web listeners, then serve both
-//! under a single fan-out shutdown signal.
+//! The started application: bind the proxy listener, build the UI's
+//! [`Control`] handle, then serve until the shutdown signal.
 
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use anyhow::Context as _;
-use axum::Router;
-use tokio::net::TcpListener;
 use tokio::sync::watch;
 use zicade_config::{Config, RoutingMode, ValidationCtx};
+use zicade_control::{Control, MetricsSource, StatusSnapshot};
 use zicade_observe::LogStore;
 use zicade_proxy::ProxyServer;
-use zicade_web::{AppState, MetricsSource, StatusSnapshot, load_or_create_token, router};
 
 use crate::routing::build_routing;
 
-/// Adapts the proxy's live [`zicade_proxy::ProxyMetrics`] to the web crate's
-/// [`MetricsSource`] trait so `GET /api/status` reports real counters.
+/// Adapts the proxy's live [`zicade_proxy::ProxyMetrics`] to the control
+/// crate's [`MetricsSource`] trait so the status view reports real counters.
 struct ProxyMetricsSource(zicade_proxy::ProxyMetrics);
 
 impl MetricsSource for ProxyMetricsSource {
@@ -40,19 +38,18 @@ impl MetricsSource for ProxyMetricsSource {
     fn bytes_out(&self) -> u64 {
         self.0.bytes_out()
     }
+
+    fn connections(&self) -> Vec<zicade_control::ConnectionSnapshot> {
+        self.0.connections()
+    }
 }
 
-/// A started application with both listeners bound and ready to serve.
+/// A started application with its listener bound and ready to serve.
 pub struct App {
     proxy: ProxyServer,
     proxy_addr: SocketAddr,
-    web_listener: TcpListener,
-    web_addr: SocketAddr,
-    router: Router,
-    /// Fans the shutdown signal out to the proxy, the web server, and the web
-    /// crate's SSE streams (via the receiver handed to `AppState`). Firing it
-    /// ends the long-lived SSE responses so axum's graceful shutdown completes
-    /// instead of waiting forever on an open browser tab.
+    control: Control,
+    /// Fans the shutdown signal out to the proxy and the corp-network monitor.
     shutdown_tx: watch::Sender<bool>,
     /// The corporate-network gate. Always present so the corp-network toggle can
     /// be switched on (or off) live via the UI without a restart; while disabled
@@ -63,8 +60,8 @@ pub struct App {
 }
 
 impl App {
-    /// Validate the config, build routing, and bind the proxy and web listeners
-    /// on loopback. Fails fast (before serving) on an invalid config or a bind
+    /// Validate the config, build routing, and bind the proxy listener on
+    /// loopback. Fails fast (before serving) on an invalid config or a bind
     /// error, with context on the returned [`anyhow::Error`].
     pub async fn start(
         config: Config,
@@ -83,10 +80,6 @@ impl App {
                 format!("listen.host is not an IP address: {}", config.listen.host)
             })?;
 
-        // The UI token is provisioned before binding so a failure here fails
-        // fast without leaving listeners open.
-        let token = load_or_create_token().context("failed to load or create the UI token")?;
-
         // Bind the proxy. When the corp-network gate is enabled it owns the live
         // routing (set by the gate below); otherwise the configured routing is
         // fixed now, failing fast on a build error.
@@ -102,37 +95,26 @@ impl App {
         // into `Self`. The gate swaps routing through this handle (on network or
         // config changes), so edits take effect without a restart.
         let routing_handle = proxy.routing_handle();
-        // Shared on-corp state (gate → web status). Always allocated: the gate is
+        // Shared on-corp state (gate → status view). Always allocated: the gate is
         // always present, and it writes `None` here while disabled so the status
         // omits `onCorp` until the gate is actually gating.
-        let on_corp_cell: zicade_web::OnCorpCell = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let on_corp_cell: zicade_control::OnCorpCell =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
         let (hook, gate) =
             build_apply_hook_and_gate(&config, &routing_handle, on_corp_cell.clone(), log_reload);
-
-        // The web server sits on the proxy port + 1 (both loopback).
-        let web_port = proxy_addr
-            .port()
-            .checked_add(1)
-            .context("proxy port + 1 overflows u16; choose a lower listen.port")?;
-        let web_listener = TcpListener::bind(SocketAddr::new(host, web_port))
-            .await
-            .context("failed to bind the web listener")?;
-        let web_addr = web_listener.local_addr()?;
 
         // Capture the live metrics handle before `proxy` is moved into `Self`.
         let metrics = proxy.metrics();
 
-        // One shutdown channel drives everything: `run`'s driver flips it, the
-        // proxy and web servers watch it, and the web layer's SSE streams end on
-        // it (the receiver handed to `AppState`).
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        // One shutdown channel drives everything: `run`'s driver flips it and
+        // the proxy and the corp-network monitor watch it.
+        let (shutdown_tx, _) = watch::channel(false);
 
-        let state = AppState::new(config, config_path, token, logs);
-        let state = state.with_metrics_source(std::sync::Arc::new(ProxyMetricsSource(metrics)));
-        let state = state.with_apply_hook(hook);
-        let state = state.with_shutdown(shutdown_rx);
-        let state = state.with_on_corp(on_corp_cell);
-        state.set_status(StatusSnapshot {
+        let control = Control::new(config, config_path, logs)
+            .with_metrics_source(std::sync::Arc::new(ProxyMetricsSource(metrics)))
+            .with_apply_hook(hook)
+            .with_on_corp(on_corp_cell);
+        control.set_status(StatusSnapshot {
             routing_mode: routing_mode.to_owned(),
             listen_addr: proxy_addr.to_string(),
             ..StatusSnapshot::default()
@@ -141,9 +123,7 @@ impl App {
         Ok(Self {
             proxy,
             proxy_addr,
-            web_listener,
-            web_addr,
-            router: router(state),
+            control,
             shutdown_tx,
             gate,
         })
@@ -154,19 +134,16 @@ impl App {
         self.proxy_addr
     }
 
-    /// The bound web (UI/API) listen address.
-    pub fn web_addr(&self) -> SocketAddr {
-        self.web_addr
+    /// The UI's handle on this app: config, status, logs, and live apply.
+    pub fn control(&self) -> Control {
+        self.control.clone()
     }
 
-    /// Serve the proxy and web servers until `shutdown` resolves, fanning the
-    /// signal out to both. If either server exits on its own first, the other
-    /// is signaled too so `run` never hangs; the first error is surfaced.
+    /// Serve the proxy until `shutdown` resolves, then stop the corp-network
+    /// monitor with it.
     pub async fn run(self, shutdown: impl Future<Output = ()> + Send) -> anyhow::Result<()> {
         let Self {
             proxy,
-            web_listener,
-            router,
             shutdown_tx: tx,
             gate,
             ..
@@ -179,37 +156,18 @@ impl App {
         gate.spawn(tx.subscribe())
             .context("start the corp-network monitor thread")?;
 
-        let proxy_tx = tx.clone();
-        let proxy_fut = {
-            let signal = wait_for_shutdown(tx.subscribe());
+        let driver = {
+            let tx = tx.clone();
             async move {
-                let res = proxy.serve(signal).await;
-                let _ = proxy_tx.send(true);
-                res.context("proxy server error")
+                shutdown.await;
+                let _ = tx.send(true);
             }
         };
-
-        let web_tx = tx.clone();
-        let web_fut = {
-            let signal = wait_for_shutdown(tx.subscribe());
-            async move {
-                let res = axum::serve(web_listener, router)
-                    .with_graceful_shutdown(signal)
-                    .await;
-                let _ = web_tx.send(true);
-                res.context("web server error")
-            }
-        };
-
-        let driver = async move {
-            shutdown.await;
-            let _ = tx.send(true);
-        };
-
-        let (proxy_res, web_res, ()) = tokio::join!(proxy_fut, web_fut, driver);
-        proxy_res?;
-        web_res?;
-        Ok(())
+        let proxy_fut = proxy.serve(wait_for_shutdown(tx.subscribe()));
+        let (proxy_res, ()) = tokio::join!(proxy_fut, driver);
+        // Whatever ended the proxy, the monitor thread must stop with it.
+        let _ = tx.send(true);
+        proxy_res.context("proxy server error")
     }
 }
 
@@ -246,9 +204,9 @@ fn routing_mode_label(mode: RoutingMode) -> &'static str {
 fn build_apply_hook_and_gate(
     config: &Config,
     routing_handle: &zicade_proxy::RoutingHandle,
-    on_corp_cell: zicade_web::OnCorpCell,
+    on_corp_cell: zicade_control::OnCorpCell,
     log_reload: crate::LogReload,
-) -> (zicade_web::ConfigApplyHook, crate::netmon::NetworkGate) {
+) -> (zicade_control::ConfigApplyHook, crate::netmon::NetworkGate) {
     let gate = crate::netmon::NetworkGate::new(
         routing_handle.clone(),
         config.clone(),
@@ -274,7 +232,7 @@ fn build_apply_hook_and_gate(
     // (failing fast on a build error) in that case.
     gate.evaluate_now();
     let hook_gate = gate.clone();
-    let hook: zicade_web::ConfigApplyHook = std::sync::Arc::new(move |cfg: &Config| {
+    let hook: zicade_control::ConfigApplyHook = std::sync::Arc::new(move |cfg: &Config| {
         // Apply the log level first so the reconfigure it triggers is captured at
         // the newly-selected verbosity.
         (log_reload)(&cfg.logging.level);

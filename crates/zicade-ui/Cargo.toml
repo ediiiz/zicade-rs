@@ -1,0 +1,24 @@
+[package]
+name = "zicade-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+gpui-kit = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+zicade-config = { path = "../zicade-config" }
+zicade-control = { path = "../zicade-control" }
+zicade-observe = { path = "../zicade-observe" }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

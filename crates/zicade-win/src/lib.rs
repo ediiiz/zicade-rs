@@ -12,13 +12,11 @@
 use std::fmt;
 
 mod netmon;
-pub mod service;
 mod sspi;
 pub mod tray;
 mod winhttp;
 
 pub use netmon::{active_dns_suffixes, wait_for_network_change};
-pub use service::ServiceStop;
 pub use sspi::{LoopbackReport, SspiNegotiate, SspiPackage, run_loopback_handshake};
 pub use winhttp::WinHttpPacBackend;
 
@@ -29,9 +27,6 @@ pub enum WinError {
     UnsupportedPlatform,
     /// An SSPI/Win32 call failed with the given `SECURITY_STATUS`/`HRESULT` code.
     Sspi(i32),
-    /// A Service Control Manager operation failed; the message names the failing
-    /// call and its Win32/HRESULT code (e.g. access-denied without Administrator).
-    Service(String),
     /// A system-tray / console / shell-open operation failed; the message names
     /// the failing call and its code.
     Tray(String),
@@ -42,7 +37,6 @@ impl fmt::Display for WinError {
         match self {
             WinError::UnsupportedPlatform => write!(f, "unsupported platform (not Windows)"),
             WinError::Sspi(code) => write!(f, "SSPI call failed: 0x{code:08x}"),
-            WinError::Service(msg) => write!(f, "service control manager error: {msg}"),
             WinError::Tray(msg) => write!(f, "system-tray error: {msg}"),
         }
     }
@@ -69,9 +63,20 @@ pub fn process_handle_count() -> Option<u32> {
     imp::process_handle_count()
 }
 
+/// Whether Windows' "Show animations in Windows" setting is on; `None` when it
+/// cannot be read (or off-Windows). The window turns its own motion off when
+/// this is `Some(false)`.
+pub fn animations_enabled() -> Option<bool> {
+    imp::animations_enabled()
+}
+
 #[cfg(not(windows))]
 mod imp {
     use super::WinError;
+
+    pub(super) fn animations_enabled() -> Option<bool> {
+        None
+    }
 
     pub(super) fn probe_sspi_negotiate() -> Result<(), WinError> {
         Err(WinError::UnsupportedPlatform)
@@ -117,6 +122,27 @@ mod imp {
             let _ = FreeCredentialsHandle(&cred);
         }
         Ok(())
+    }
+
+    pub(super) fn animations_enabled() -> Option<bool> {
+        use windows::Win32::Foundation::BOOL;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+        };
+
+        let mut enabled = BOOL(1);
+        // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL through `pvparam`,
+        // which points at `enabled`, a live, exclusively-borrowed BOOL.
+        unsafe {
+            SystemParametersInfoW(
+                SPI_GETCLIENTAREAANIMATION,
+                0,
+                Some(std::ptr::from_mut(&mut enabled).cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+            .ok()?;
+        }
+        Some(enabled.as_bool())
     }
 
     pub(super) fn process_handle_count() -> Option<u32> {

@@ -1,7 +1,7 @@
 ; Zicade Windows installer - Inno Setup 6 script.
 ;
 ; Produces a single setup .exe that installs zicade.exe, offers a per-user vs
-; all-users scope choice, and two optional startup mechanisms. Compiled in CI
+; all-users scope choice, and an optional start-on-login entry. Compiled in CI
 ; by ISCC against the MSVC-built exe (see .github/workflows/release-please.yml).
 ;
 ; Two symbols are passed on the command line; both have local-build fallbacks:
@@ -49,8 +49,6 @@ PrivilegesRequiredOverridesAllowed=dialog
 
 [Tasks]
 Name: "startonlogin"; Description: "Start Zicade when I sign in (runs in the notification-area tray)"; Flags: unchecked
-; A machine service needs admin, so this task only appears for an all-users install.
-Name: "runasservice"; Description: "Run Zicade as a Windows service (all users, starts at boot)"; Flags: unchecked; Check: IsAdminInstallMode
 
 [Files]
 ; DestName renames the release artifact (e.g. zicade-<tag>-...-msvc.exe) to the
@@ -61,17 +59,29 @@ Source: "{#ExeSource}"; DestDir: "{app}"; DestName: "{#MyAppExe}"; Flags: ignore
 Name: "{group}\Zicade"; Filename: "{app}\{#MyAppExe}"; Comment: "Local forwarding HTTP/HTTPS proxy"
 
 [Registry]
-; Start on login: launch the bare exe (no subcommand) so Zicade's console
-; heuristic runs it in tray mode. HKA maps to HKLM (all users) or HKCU
+; Start on login: `--background` runs in the tray without opening the window,
+; so signing in does not pop it up. HKA maps to HKLM (all users) or HKCU
 ; (per-user) to match the install scope.
-Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Zicade"; ValueData: """{app}\{#MyAppExe}"""; Flags: uninsdeletevalue; Tasks: startonlogin
-
-[Run]
-; Register the auto-start service via the app's own tested SCM path. Runs only
-; when the (admin-only) task is selected.
-Filename: "{app}\{#MyAppExe}"; Parameters: "service install"; Flags: runhidden; Tasks: runasservice
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Zicade"; ValueData: """{app}\{#MyAppExe}"" --background"; Flags: uninsdeletevalue; Tasks: startonlogin
 
 [UninstallRun]
-; Remove the service on uninstall. Gated to admin installs; a no-op (nonzero
-; exit) when no service was registered is harmless and ignored.
-Filename: "{app}\{#MyAppExe}"; Parameters: "service uninstall"; Flags: runhidden; RunOnceId: "RemoveZicadeService"; Check: IsAdminInstallMode
+; Remove a service left by an older version (see PrepareToInstall below).
+Filename: "{sys}\sc.exe"; Parameters: "delete Zicade"; Flags: runhidden; RunOnceId: "RemoveZicadeService"; Check: IsAdminInstallMode
+
+[Code]
+// Older versions could register a "Zicade" auto-start service running
+// `zicade.exe service run`. This exe no longer understands that command, so a
+// leftover service would fail at every boot; a running one also locks the exe
+// this setup is about to replace. Stop and delete it before any file is
+// copied. Both calls fail harmlessly when no such service exists.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  if IsAdminInstallMode then
+  begin
+    Exec(ExpandConstant('{sys}\sc.exe'), 'stop Zicade', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete Zicade', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  Result := '';
+end;

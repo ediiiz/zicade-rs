@@ -2,7 +2,8 @@
 
 Local HTTP/HTTPS forward proxy for a domain-joined Windows box: authenticates to
 the corporate upstream (SSPI Negotiate/NTLM or Basic), routes per request via
-PAC, and serves a loopback-only web UI. `zicade-rs-PROMPT.md` is the original
+PAC, and has a native gpui-kit window (`zicade-ui`) that talks to the running
+app in-process through `zicade-control`. `zicade-rs-PROMPT.md` is the original
 build spec and the source of the §8 lessons table; parts of it are stale (no
 htmx, milestones are done), so trust the code over it.
 
@@ -51,6 +52,6 @@ These have each been broken once; tests pin them, keep them pinned.
 - **Peers don't size our buffers.** Bytes from a client, origin, or upstream
   are streamed or read under a fixed cap; network waits that can stall have a
   timeout.
-- **The local API never returns secrets.** `GET /api/config` redacts
-  passwords; `PUT` keeps a saved password the UI left blank. Every route
-  rejects a non-loopback `Host` (DNS rebinding).
+- **The UI never sees secrets.** `Control::config_redacted` strips passwords;
+  `Control::apply` keeps a saved password the UI left blank. Nothing but the
+  proxy listens on a socket.

@@ -2,7 +2,7 @@
 //!
 //! The Win32 message pump + `Shell_NotifyIconW` cannot run headless, so the
 //! test that pops a *real* tray icon is gated behind `ZICADE_TRAY_IT=1` and
-//! marked `#[ignore]` (mirroring `service_it.rs`'s `ZICADE_SERVICE_IT` gate).
+//! marked `#[ignore]`.
 //! To run it on a real desktop session:
 //!
 //! ```text
@@ -26,9 +26,9 @@ fn console_process_count_does_not_panic() {
 
 #[test]
 fn menu_item_and_control_model() {
-    let item = TrayMenuItem::new(7, "Open WebUI");
+    let item = TrayMenuItem::new(7, "Open Zicade");
     assert_eq!(item.id, 7);
-    assert_eq!(item.label, "Open WebUI");
+    assert_eq!(item.label, "Open Zicade");
     assert_ne!(TrayControl::Continue, TrayControl::Quit);
 }
 
@@ -40,10 +40,10 @@ fn tray_pops_and_closes_on_close() {
         eprintln!("SKIP tray_pops_and_closes_on_close: set ZICADE_TRAY_IT=1 (desktop session)");
         return;
     }
-    // Manual IT: a tray icon appears with exactly "Open WebUI" and "Close".
-    // Clicking "Close" (id 2) ends the pump; "Open WebUI" (id 1) keeps it up.
+    // Manual IT: a tray icon appears with exactly "Open Zicade" and "Close".
+    // Clicking "Close" (id 2) ends the pump; "Open Zicade" (id 1) keeps it up.
     let items = vec![
-        TrayMenuItem::new(1, "Open WebUI"),
+        TrayMenuItem::new(1, "Open Zicade"),
         TrayMenuItem::new(2, "Close"),
     ];
     run_tray("Zicade (integration test)", items, |id| {
@@ -62,15 +62,11 @@ fn tray_pops_and_closes_on_close() {
 #[test]
 fn tray_unsupported_off_windows() {
     use zicade_win::WinError;
-    use zicade_win::tray::{hide_console, open_url};
+    use zicade_win::tray::hide_console;
 
     assert_eq!(console_process_count(), 0);
     assert_eq!(hide_console(), Err(WinError::UnsupportedPlatform));
-    assert_eq!(
-        open_url("http://127.0.0.1:3130/"),
-        Err(WinError::UnsupportedPlatform)
-    );
-    let items = vec![TrayMenuItem::new(1, "Open WebUI")];
+    let items = vec![TrayMenuItem::new(1, "Open Zicade")];
     assert_eq!(
         run_tray("t", items, |_| TrayControl::Quit),
         Err(WinError::UnsupportedPlatform)

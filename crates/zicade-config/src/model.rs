@@ -12,12 +12,10 @@ pub struct Config {
     pub routing: RoutingConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
-    #[serde(default)]
-    pub web: WebConfig,
 }
 
 impl Config {
-    /// A copy safe to hand to the web UI: stored passwords are removed.
+    /// A copy safe to show in the UI: stored passwords are removed.
     #[must_use]
     pub fn without_secrets(&self) -> Config {
         let mut cfg = self.clone();
@@ -251,20 +249,6 @@ impl AuthConfig {
             self.password.clone_from(&saved.password);
         }
     }
-}
-
-/// Web UI / local API configuration.
-///
-/// `auth_required` controls whether mutating endpoints (`PUT /api/config`)
-/// require the local `X-Zicade-Token` header. It defaults to **false**: the web
-/// server is loopback-only, so auth is normally unneeded. Set it to `true` to
-/// require the token (which also serves as CSRF protection). Read-only endpoints
-/// stay open on loopback regardless.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct WebConfig {
-    /// Require the `X-Zicade-Token` header on mutations. Default `false`.
-    #[serde(default, rename = "authRequired")]
-    pub auth_required: bool,
 }
 
 /// Logging configuration.
