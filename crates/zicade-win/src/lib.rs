@@ -63,9 +63,20 @@ pub fn process_handle_count() -> Option<u32> {
     imp::process_handle_count()
 }
 
+/// Whether Windows' "Show animations in Windows" setting is on; `None` when it
+/// cannot be read (or off-Windows). The window turns its own motion off when
+/// this is `Some(false)`.
+pub fn animations_enabled() -> Option<bool> {
+    imp::animations_enabled()
+}
+
 #[cfg(not(windows))]
 mod imp {
     use super::WinError;
+
+    pub(super) fn animations_enabled() -> Option<bool> {
+        None
+    }
 
     pub(super) fn probe_sspi_negotiate() -> Result<(), WinError> {
         Err(WinError::UnsupportedPlatform)
@@ -111,6 +122,27 @@ mod imp {
             let _ = FreeCredentialsHandle(&cred);
         }
         Ok(())
+    }
+
+    pub(super) fn animations_enabled() -> Option<bool> {
+        use windows::Win32::Foundation::BOOL;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+        };
+
+        let mut enabled = BOOL(1);
+        // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL through `pvparam`,
+        // which points at `enabled`, a live, exclusively-borrowed BOOL.
+        unsafe {
+            SystemParametersInfoW(
+                SPI_GETCLIENTAREAANIMATION,
+                0,
+                Some(std::ptr::from_mut(&mut enabled).cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+            .ok()?;
+        }
+        Some(enabled.as_bool())
     }
 
     pub(super) fn process_handle_count() -> Option<u32> {

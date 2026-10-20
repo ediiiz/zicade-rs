@@ -8,6 +8,7 @@
 //! on [`UiCommand::Show`]; closing it leaves the app (and the proxy) running.
 
 mod assets;
+pub mod chart_model;
 pub mod choices;
 pub mod connection_rates;
 pub mod form_model;
@@ -39,6 +40,9 @@ pub struct Launch {
     pub show_window: bool,
     /// Commands from the tray.
     pub commands: UnboundedReceiver<UiCommand>,
+    /// Hold still: the system asked for less motion (Windows' "Show
+    /// animations" is off), so animated values jump to their targets.
+    pub reduce_motion: bool,
 }
 
 /// Run the UI loop on this (the main) thread.

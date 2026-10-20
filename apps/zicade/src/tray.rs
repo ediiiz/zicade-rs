@@ -109,6 +109,7 @@ pub fn run_tray_mode(show_window: bool) -> ExitCode {
         control,
         show_window,
         commands: ui_rx,
+        reduce_motion: zicade_win::animations_enabled() == Some(false),
     });
     // Only reached if the UI loop returns on its own; stop the proxy with it.
     let _ = shutdown_tx.send(true);

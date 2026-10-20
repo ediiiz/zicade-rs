@@ -26,6 +26,8 @@ fn the_status_page_shows_the_running_proxy(cx: &mut TestAppContext) {
             Some("127.0.0.1:3229")
         );
         assert_eq!(label(window, "stat-requests").as_deref(), Some("0"));
+        assert_eq!(label(window, "rate-download").as_deref(), Some("0 B/s"));
+        assert_eq!(label(window, "rate-upload").as_deref(), Some("0 B/s"));
         assert_eq!(label(window, "stat-downloaded").as_deref(), Some("0 B"));
     })
     .unwrap();

@@ -14,6 +14,7 @@ pub(crate) fn run(launch: Launch) {
         control,
         show_window,
         commands,
+        reduce_motion,
     } = launch;
     application()
         .with_assets(crate::assets::Assets)
@@ -22,6 +23,7 @@ pub(crate) fn run(launch: Launch) {
         .with_quit_mode(QuitMode::Explicit)
         .run(move |cx: &mut App| {
             init(cx);
+            cx.set_reduce_motion(reduce_motion);
             crate::views::bind_keys(cx);
             let mut main = MainWindow::new(control);
             if show_window {
