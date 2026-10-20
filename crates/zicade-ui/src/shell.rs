@@ -102,6 +102,19 @@ impl MainWindow {
         };
         let control = self.control.clone();
         match open_window(options, cx, move |window, cx| {
+            // A native close from the title bar leaves the platform window
+            // and its GPU surfaces alive (~40 MB per reopen). Closing through
+            // gpui's own removal frees them, so take that path instead, once
+            // the platform's close callback has returned. Should the window
+            // already be gone by then, there is nothing left to release.
+            window.on_window_should_close(cx, |window, cx| {
+                window
+                    .spawn(cx, async |cx| {
+                        cx.update(|window, _| window.remove_window()).ok()
+                    })
+                    .detach();
+                false
+            });
             cx.new(|cx| MainView::new(control, window, cx))
         }) {
             Ok((handle, _)) => {
