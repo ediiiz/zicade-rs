@@ -6,6 +6,8 @@
 //! [`run`] takes over the calling thread — it must be the main thread — and
 //! returns only if the UI loop ends. The window is opened and brought forward
 //! on [`UiCommand::Show`]; closing it leaves the app (and the proxy) running.
+//! Started without the window, the UI toolkit itself waits for the first
+//! [`UiCommand::Show`], so a tray app nobody has opened stays small.
 
 mod assets;
 pub mod chart_model;
@@ -17,7 +19,7 @@ mod shell;
 pub mod throughput;
 mod views;
 
-pub use shell::{MainWindow, follow_tray};
+pub use shell::{MainWindow, follow_tray, wait_for_show};
 pub use views::{MainView, Page, bind_keys};
 
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -36,7 +38,8 @@ pub enum UiCommand {
 pub struct Launch {
     /// The running app, or why it failed to start (shown in the window).
     pub control: Result<Control, String>,
-    /// Open the window right away rather than waiting for [`UiCommand::Show`].
+    /// Open the window right away rather than waiting for [`UiCommand::Show`]
+    /// (which also defers starting the UI toolkit until then).
     pub show_window: bool,
     /// Commands from the tray.
     pub commands: UnboundedReceiver<UiCommand>,

@@ -13,9 +13,15 @@ pub(crate) fn run(launch: Launch) {
     let Launch {
         control,
         show_window,
-        commands,
+        mut commands,
         reduce_motion,
     } = launch;
+    // gpui costs tens of megabytes as soon as it starts, and cannot be shut
+    // down again within the process, so an app started in the background
+    // starts it only once the window is first asked for.
+    if !show_window && !wait_for_show(&mut commands) {
+        return;
+    }
     application()
         .with_assets(crate::assets::Assets)
         // The default on Windows quits when the last window closes, which
@@ -26,12 +32,17 @@ pub(crate) fn run(launch: Launch) {
             cx.set_reduce_motion(reduce_motion);
             crate::views::bind_keys(cx);
             let mut main = MainWindow::new(control);
-            if show_window {
-                main.show(cx);
-            }
+            main.show(cx);
             cx.spawn(async move |cx| follow_tray(commands, main, cx).await)
                 .detach();
         })
+}
+
+/// Block until the tray first asks for the window: `true` on
+/// [`UiCommand::Show`], `false` on [`UiCommand::Quit`] or if the tray side
+/// goes away first.
+pub fn wait_for_show(commands: &mut UnboundedReceiver<UiCommand>) -> bool {
+    matches!(commands.blocking_recv(), Some(UiCommand::Show))
 }
 
 /// Carry out the tray's commands until [`UiCommand::Quit`] (which quits the
