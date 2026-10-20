@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.4.0](https://github.com/ediiiz/zicade-rs/compare/v0.3.3...v0.4.0) (2026-10-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* the web UI/API on port+1, `web.authRequired`, the ui-token file, and `zicade service run|install|uninstall` are removed. Configs with a `web` section still load; it is dropped on the next save.
+
+### Features
+
+* live connection tracking and real throughput ([11398d0](https://github.com/ediiiz/zicade-rs/commit/11398d0e017838ba92d58bb24e949af138537adc))
+* native gpui-kit window replaces the browser UI ([0d8b5a1](https://github.com/ediiiz/zicade-rs/commit/0d8b5a1e8d47060d8638e9040ad572fbb2fc4f6d))
+* **ui:** sidebar shell and redesigned pages ([7cadebd](https://github.com/ediiiz/zicade-rs/commit/7cadebd335f1b3e569cd616a02cc778cd62ea113))
+
+
+### Bug Fixes
+
+* **proxy:** stream upstream HTTP-forward responses ([d2a3482](https://github.com/ediiiz/zicade-rs/commit/d2a348222a2f5e554a2b3108ae2691efd412ad76))
+* recover poisoned locks instead of failing open ([180d621](https://github.com/ediiiz/zicade-rs/commit/180d621f820660894fb890c34364e7ef8560e6e8))
+* **ui:** readable throughput chart that scrolls smoothly ([2c37d4b](https://github.com/ediiiz/zicade-rs/commit/2c37d4b9123215bd15c010748e43d23583c63d73))
+* **ui:** throughput chart scrolls without changing shape ([566e092](https://github.com/ediiiz/zicade-rs/commit/566e0926f81d480f48bdad7783d972395e246b5e))
+* **web:** stop serving stored passwords and reject foreign Host headers ([8382fc0](https://github.com/ediiiz/zicade-rs/commit/8382fc0f7cbef0fc1c9b7518e04eb654e146f79f))
+
+
+### Documentation
+
+* screenshots of the window in the README ([3cb4d5b](https://github.com/ediiiz/zicade-rs/commit/3cb4d5bb29af59c4701ee374c288d27f579e5516))
+
 ## [0.3.3](https://github.com/ediiiz/zicade-rs/compare/v0.3.2...v0.3.3) (2026-07-28)
 
 

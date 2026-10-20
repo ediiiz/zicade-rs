@@ -9214,7 +9214,7 @@ dependencies = [
 
 [[package]]
 name = "zicade"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "embed-resource",
@@ -9233,7 +9233,7 @@ dependencies = [
 
 [[package]]
 name = "zicade-auth"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "thiserror 2.0.21",
@@ -9241,7 +9241,7 @@ dependencies = [
 
 [[package]]
 name = "zicade-config"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -9250,7 +9250,7 @@ dependencies = [
 
 [[package]]
 name = "zicade-control"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "thiserror 2.0.21",
  "zicade-config",
@@ -9260,7 +9260,7 @@ dependencies = [
 
 [[package]]
 name = "zicade-observe"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -9272,7 +9272,7 @@ dependencies = [
 
 [[package]]
 name = "zicade-proxy"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -9288,7 +9288,7 @@ dependencies = [
 
 [[package]]
 name = "zicade-routing"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "thiserror 2.0.21",
  "zicade-config",
@@ -9296,7 +9296,7 @@ dependencies = [
 
 [[package]]
 name = "zicade-ui"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "gpui-kit",
@@ -9312,7 +9312,7 @@ dependencies = [
 
 [[package]]
 name = "zicade-win"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "tokio",
  "windows 0.59.0",
