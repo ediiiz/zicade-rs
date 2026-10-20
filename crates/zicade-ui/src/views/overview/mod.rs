@@ -1,6 +1,6 @@
 //! The first thing the window shows: is the proxy routing the way it should,
 //! how much is flowing, and what is in flight. Sampled once a second; the
-//! chart animates between samples unless the system asks for less motion.
+//! chart slides between samples unless the system asks for less motion.
 
 use std::time::{Duration, Instant};
 
@@ -17,7 +17,7 @@ mod parts;
 use self::parts::{routing_sentence, section_title, total};
 use super::Page;
 use super::connections::kind_label;
-use crate::chart_model::WINDOW;
+use crate::chart_model::{Scale, WINDOW, rescale, series};
 use crate::connection_rates::ConnectionRates;
 use crate::throughput::{Throughput, format_bytes, format_bytes_per_sec, format_count};
 
@@ -37,9 +37,12 @@ pub(crate) struct OverviewView {
     open_count: usize,
     rates: ConnectionRates,
     started: Instant,
-    /// When the newest throughput sample was taken; the chart glides from
+    /// When the newest throughput sample was taken; the chart slides from
     /// the previous sample towards it over the next second.
     sampled: Instant,
+    /// The chart's y scale, held between samples so it only changes when the
+    /// line outgrows or dwarfs it.
+    scale: Option<Scale>,
 }
 
 impl EventEmitter<Navigate> for OverviewView {}
@@ -57,6 +60,7 @@ impl OverviewView {
             rates: ConnectionRates::default(),
             started: Instant::now(),
             sampled: Instant::now(),
+            scale: None,
         };
         view.refresh();
         // The loop ends when the window (and with it this view) is gone.
@@ -83,6 +87,11 @@ impl OverviewView {
         self.sampled = Instant::now();
         self.throughput
             .sample(self.status.bytes_in, self.status.bytes_out, at);
+        let peak = series(&self.throughput.history())
+            .iter()
+            .map(|(rx, tx)| rx.max(*tx))
+            .fold(0.0, f64::max);
+        self.scale = Some(rescale(self.scale, peak));
         let all = self.control.connections();
         self.rates.update(&all, at);
         let open: Vec<_> = all
@@ -285,7 +294,12 @@ impl Render for OverviewView {
             .pb_6()
             .gap_6()
             .child(self.summary(cx))
-            .child(chart::throughput(&self.throughput.history(), progress, cx))
+            .child(chart::throughput(
+                &self.throughput.history(),
+                self.scale.unwrap_or_else(|| rescale(None, 0.0)),
+                progress,
+                cx,
+            ))
             .child(self.totals(cx))
             .child(self.in_flight(cx));
         div().size_full().overflow_y_scrollbar().child(content)

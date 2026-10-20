@@ -1,20 +1,66 @@
 //! The throughput chart's numbers: a scale people can read, labels that say
-//! when, and frames that glide between one-second samples.
+//! when, and a drawing that slides left between samples without changing
+//! shape.
 
-use zicade_ui::chart_model::{WINDOW, frame, scale_top, when_label};
+use zicade_ui::chart_model::{
+    Scale, WINDOW, axis_rate, rate_at, rescale, scale, series, slide, when_label,
+};
 
 #[test]
-fn the_scale_tops_out_at_a_round_value_above_the_peak() {
-    // Three intervals of a 1-2-5 step: tick labels read 0, 1, 2, 3 MB/s.
-    let mb = 1024.0 * 1024.0;
-    assert_eq!(scale_top(2.7 * mb), 3.0 * mb);
-    assert_eq!(scale_top(3.1 * mb), 6.0 * mb);
-    assert_eq!(scale_top(40.0 * 1024.0), 60.0 * 1024.0);
+fn the_scale_is_two_to_four_round_steps_just_above_the_peak() {
+    let kb = 1024.0;
+    let mb = kb * kb;
+    assert_eq!(scale(2.7 * mb), Scale { step: mb, steps: 3 });
+    assert_eq!(scale(3.1 * mb), Scale { step: mb, steps: 4 });
+    assert_eq!(
+        scale(40.0 * kb),
+        Scale {
+            step: 10.0 * kb,
+            steps: 4
+        }
+    );
+    assert_eq!(
+        scale(4.5 * mb),
+        Scale {
+            step: 2.0 * mb,
+            steps: 3
+        }
+    );
+    assert_eq!(scale(2.7 * mb).top(), 3.0 * mb);
 }
 
 #[test]
 fn an_idle_chart_still_has_a_readable_scale() {
-    assert_eq!(scale_top(0.0), 3.0 * 1024.0);
+    assert_eq!(
+        scale(0.0),
+        Scale {
+            step: 1024.0,
+            steps: 2
+        }
+    );
+}
+
+#[test]
+fn the_scale_holds_still_unless_the_line_outgrows_or_dwarfs_it() {
+    let mb = 1024.0 * 1024.0;
+    let held = rescale(None, 2.7 * mb);
+    assert_eq!(held.top(), 3.0 * mb);
+
+    // Wobbling below the top keeps the scale: no jumps every second.
+    assert_eq!(rescale(Some(held), 2.0 * mb), held);
+    assert_eq!(rescale(Some(held), 1.3 * mb), held);
+    // Outgrowing it rescales at once, so nothing is cut off.
+    assert_eq!(rescale(Some(held), 3.5 * mb).top(), 4.0 * mb);
+    // A peak far below it lets it shrink, so a quiet line is not flat.
+    assert_eq!(rescale(Some(held), 0.5 * mb), scale(0.5 * mb));
+}
+
+#[test]
+fn axis_values_read_as_round_numbers() {
+    let mb = 1024.0 * 1024.0;
+    assert_eq!(axis_rate(2.0 * mb), "2 MB/s");
+    assert_eq!(axis_rate(0.0), "0 B/s");
+    assert_eq!(axis_rate(500.0 * 1024.0), "500 KB/s");
 }
 
 #[test]
@@ -32,34 +78,49 @@ fn labels_say_how_long_ago() {
 }
 
 #[test]
-fn a_frame_always_spans_the_whole_window() {
-    // Two samples so far: the rest of the minute is empty history.
-    let frame = frame(&[(10.0, 1.0), (20.0, 2.0)], 1.0);
+fn the_series_is_the_samples_themselves_padded_to_one_more_than_the_window() {
+    // One sample beyond the window is drawn off the right edge, ready to
+    // slide in; older history than measured is empty.
+    let drawn = series(&[(10.0, 1.0), (20.0, 2.0)]);
 
-    assert_eq!(frame.len(), WINDOW);
-    assert_eq!(frame[0], (0.0, 0.0));
-    assert_eq!(frame[WINDOW - 1], (20.0, 2.0));
+    assert_eq!(drawn.len(), WINDOW + 1);
+    assert_eq!(drawn[0], (0.0, 0.0));
+    assert_eq!(drawn[WINDOW - 1], (10.0, 1.0));
+    assert_eq!(drawn[WINDOW], (20.0, 2.0));
 }
 
 #[test]
-fn frames_glide_from_one_sample_to_the_next() {
-    let history = [(0.0, 0.0), (100.0, 10.0)];
+fn drawn_values_are_the_measured_ones_never_blends() {
+    // The shape must not morph: sliding moves every point by the same
+    // distance instead of blending each value towards its neighbour.
+    let history: Vec<_> = (0..80).map(|i| (f64::from(i), 0.0)).collect();
 
-    let start = frame(&history, 0.0);
-    let halfway = frame(&history, 0.5);
-    let end = frame(&history, 1.0);
+    let drawn = series(&history);
 
-    assert_eq!(start[WINDOW - 1], (0.0, 0.0));
-    assert_eq!(halfway[WINDOW - 1], (50.0, 5.0));
-    assert_eq!(end[WINDOW - 1], (100.0, 10.0));
-    // Each point moves towards its right-hand neighbour: the line scrolls.
-    assert_eq!(halfway[WINDOW - 2], (0.0, 0.0));
+    assert_eq!(drawn.first(), Some(&(18.0, 0.0)));
+    assert_eq!(drawn.last(), Some(&(79.0, 0.0)));
 }
 
 #[test]
-fn progress_outside_zero_to_one_is_clamped() {
+fn the_drawing_slides_one_slot_per_sample() {
+    let slot = 1.0 / (WINDOW - 1) as f32;
+
+    assert_eq!(slide(0.0), 0.0);
+    assert!((slide(0.5) - slot / 2.0).abs() < 1e-6);
+    assert!((slide(1.0) - slot).abs() < 1e-6);
+    assert!(
+        (slide(7.0) - slot).abs() < 1e-6,
+        "a late sample holds, never overshoots"
+    );
+    assert_eq!(slide(-1.0), 0.0);
+}
+
+#[test]
+fn the_legend_rate_counts_from_the_previous_sample_to_the_newest() {
     let history = [(0.0, 0.0), (100.0, 10.0)];
 
-    assert_eq!(frame(&history, 7.0)[WINDOW - 1], (100.0, 10.0));
-    assert_eq!(frame(&history, -1.0)[WINDOW - 1], (0.0, 0.0));
+    assert_eq!(rate_at(&history, 0.0), (0.0, 0.0));
+    assert_eq!(rate_at(&history, 0.5), (50.0, 5.0));
+    assert_eq!(rate_at(&history, 1.0), (100.0, 10.0));
+    assert_eq!(rate_at(&[], 0.5), (0.0, 0.0));
 }
