@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.1](https://github.com/ediiiz/zicade-rs/compare/v0.4.0...v0.4.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **ui:** free the window when it is closed from the title bar ([e5cfc0b](https://github.com/ediiiz/zicade-rs/commit/e5cfc0b792280813679522e28041f1889251e130))
+
+
+### Performance
+
+* **ui:** start the UI toolkit only when the window is first opened ([8f5ec29](https://github.com/ediiiz/zicade-rs/commit/8f5ec29a92ca833df1ce0bb8c668ec6183adebc5))
+
 ## [0.4.0](https://github.com/ediiiz/zicade-rs/compare/v0.3.3...v0.4.0) (2026-10-20)
 
 
