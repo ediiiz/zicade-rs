@@ -13,9 +13,15 @@ pub(crate) fn run(launch: Launch) {
     let Launch {
         control,
         show_window,
-        commands,
+        mut commands,
         reduce_motion,
     } = launch;
+    // gpui costs tens of megabytes as soon as it starts, and cannot be shut
+    // down again within the process, so an app started in the background
+    // starts it only once the window is first asked for.
+    if !show_window && !wait_for_show(&mut commands) {
+        return;
+    }
     application()
         .with_assets(crate::assets::Assets)
         // The default on Windows quits when the last window closes, which
@@ -26,12 +32,17 @@ pub(crate) fn run(launch: Launch) {
             cx.set_reduce_motion(reduce_motion);
             crate::views::bind_keys(cx);
             let mut main = MainWindow::new(control);
-            if show_window {
-                main.show(cx);
-            }
+            main.show(cx);
             cx.spawn(async move |cx| follow_tray(commands, main, cx).await)
                 .detach();
         })
+}
+
+/// Block until the tray first asks for the window: `true` on
+/// [`UiCommand::Show`], `false` on [`UiCommand::Quit`] or if the tray side
+/// goes away first.
+pub fn wait_for_show(commands: &mut UnboundedReceiver<UiCommand>) -> bool {
+    matches!(commands.blocking_recv(), Some(UiCommand::Show))
 }
 
 /// Carry out the tray's commands until [`UiCommand::Quit`] (which quits the
@@ -102,6 +113,19 @@ impl MainWindow {
         };
         let control = self.control.clone();
         match open_window(options, cx, move |window, cx| {
+            // A native close from the title bar leaves the platform window
+            // and its GPU surfaces alive (~40 MB per reopen). Closing through
+            // gpui's own removal frees them, so take that path instead, once
+            // the platform's close callback has returned. Should the window
+            // already be gone by then, there is nothing left to release.
+            window.on_window_should_close(cx, |window, cx| {
+                window
+                    .spawn(cx, async |cx| {
+                        cx.update(|window, _| window.remove_window()).ok()
+                    })
+                    .detach();
+                false
+            });
             cx.new(|cx| MainView::new(control, window, cx))
         }) {
             Ok((handle, _)) => {

@@ -6,7 +6,7 @@ mod common;
 
 use common::{WAIT, fixture, label, log, open};
 use gpui_kit::test::{TestAppContextExt, TestWindowExt};
-use gpui_kit::{AppContext, TestAppContext, init};
+use gpui_kit::{AppContext, TestAppContext, VisualTestContext, init};
 use zicade_config::{RoutingMode, load_file};
 use zicade_ui::{MainWindow, UiCommand, follow_tray};
 
@@ -175,6 +175,25 @@ fn show_opens_one_window_and_reopens_it_after_a_close(cx: &mut TestAppContext) {
         cx.update(|cx| cx.windows().len()),
         1,
         "closed window reopens"
+    );
+}
+
+#[gpui_kit::test]
+fn the_title_bar_close_releases_the_window(cx: &mut TestAppContext) {
+    let f = fixture();
+    cx.update(init);
+    let mut main = MainWindow::new(Ok(f.control.clone()));
+    cx.update(|cx| main.show(cx));
+    let handle = main.handle().unwrap();
+
+    let mut window = VisualTestContext::from_window(handle, cx);
+    window.simulate_close();
+    cx.run_until_parked();
+
+    assert_eq!(
+        cx.update(|cx| cx.windows().len()),
+        0,
+        "closing from the title bar must drop the window, not just hide it"
     );
 }
 

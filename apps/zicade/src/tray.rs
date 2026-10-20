@@ -111,7 +111,8 @@ pub fn run_tray_mode(show_window: bool) -> ExitCode {
         commands: ui_rx,
         reduce_motion: zicade_win::animations_enabled() == Some(false),
     });
-    // Only reached if the UI loop returns on its own; stop the proxy with it.
+    // Reached when the UI loop ends, or when the tray quits before the window
+    // was ever opened; either way the proxy stops with it.
     let _ = shutdown_tx.send(true);
     ExitCode::SUCCESS
 }
