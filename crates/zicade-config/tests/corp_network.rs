@@ -25,7 +25,7 @@ fn corp_network_absent_is_none_and_valid() {
 #[test]
 fn corp_network_parses_and_defaults_poll_seconds() {
     let cfg = from_json_str(&pac_with_corp(
-        r#", "corpNetwork": { "enabled": true, "dnsSuffixes": ["droot.org"] }"#,
+        r#", "corpNetwork": { "enabled": true, "dnsSuffixes": ["ad.example.org"] }"#,
     ))
     .expect("corpNetwork parses");
     let corp = cfg
@@ -34,7 +34,7 @@ fn corp_network_parses_and_defaults_poll_seconds() {
         .as_ref()
         .expect("corpNetwork present");
     assert!(corp.enabled);
-    assert_eq!(corp.dns_suffixes, vec!["droot.org".to_owned()]);
+    assert_eq!(corp.dns_suffixes, vec!["ad.example.org".to_owned()]);
     assert_eq!(
         corp.poll_seconds, 30,
         "pollSeconds defaults to 30 when omitted"
@@ -61,7 +61,7 @@ fn corp_network_enabled_requires_a_suffix() {
 #[test]
 fn corp_network_rejects_zero_poll_seconds() {
     let cfg = from_json_str(&pac_with_corp(
-        r#", "corpNetwork": { "enabled": true, "dnsSuffixes": ["droot.org"], "pollSeconds": 0 }"#,
+        r#", "corpNetwork": { "enabled": true, "dnsSuffixes": ["ad.example.org"], "pollSeconds": 0 }"#,
     ))
     .unwrap();
     let err = cfg
@@ -87,7 +87,7 @@ fn corp_network_disabled_needs_no_suffix() {
 #[test]
 fn corp_network_round_trips() {
     let cfg = from_json_str(&pac_with_corp(
-        r#", "corpNetwork": { "enabled": true, "dnsSuffixes": ["droot.org", "corp.example"], "pollSeconds": 15 }"#,
+        r#", "corpNetwork": { "enabled": true, "dnsSuffixes": ["ad.example.org", "corp.example"], "pollSeconds": 15 }"#,
     ))
     .unwrap();
     let reparsed = from_json_str(&to_json_string(&cfg).unwrap()).unwrap();

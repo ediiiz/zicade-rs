@@ -10,7 +10,7 @@
 ## 1. Mission
 
 Build **Zicade**: a local HTTP/HTTPS forward-proxy that sits between desktop apps and a
-corporate upstream proxy (a McAfee Web Gateway), on a **domain-joined Windows 11** machine.
+corporate upstream proxy (a secure web gateway), on a **domain-joined Windows 11** machine.
 Zicade authenticates to the upstream on the app's behalf using **Windows SSPI
 (Negotiate / NTLM)** so that apps which can't do integrated auth "just work", and it resolves
 per-request routing via a **PAC file**. It ships with a **local web UI** (loopback-only) for
@@ -23,13 +23,13 @@ and to add a proper configuration/observability UI.
 
 **Non-negotiable domain facts** (the real environment this runs against):
 
-- The corporate upstream proxy is reachable at **`wp8080`** (host:port; treat as configurable).
+- The corporate upstream proxy is reachable at **`proxy.example.com:8080`** (host:port; treat as configurable).
   It returns **HTTP 407 Proxy Authentication Required** until a valid Negotiate token is
   presented.
 - The machine is **domain-joined**; SSPI can acquire a real outbound credential handle for the
   logged-in user with **no stored password**.
 - Some hosts must go **DIRECT** (internal) and others **through the upstream** (external) — the
-  PAC file decides. There may be a jump host in the environment: **Zicade must talk to `wp8080`
+  PAC file decides. There may be a jump host in the environment: **Zicade must talk to `proxy.example.com`
   directly; never route Zicade's own upstream traffic through any jump host.**
 - HTTPS traffic uses the **`CONNECT` method** to establish a tunnel; HTTP traffic is
   **forwarded** (absolute-form request line rewritten to origin-form for the upstream as
@@ -163,7 +163,7 @@ carries the same *concepts*). Model (serde):
   "listen":  { "host": "127.0.0.1", "port": 3129 },
   "routing": {
     "mode": "pac",                                  // "direct" | "upstream" | "pac"
-    "upstream": { "host": "wp8080", "port": 8080,
+    "upstream": { "host": "proxy.example.com", "port": 8080,
                   "auth": { "mode": "negotiate" } },
     "pac":      { "source": "auto",                 // "auto" | "file" | "url"
                   "path": null, "url": null,
@@ -243,9 +243,9 @@ Three tiers, all under `cargo test`:
      timeout, no panic, no hang.
 3. **Live-environment tests** — gated behind **`ZICADE_LIVE_PROXY=1`** (skipped by default,
    skip logged explicitly). Run only on the domain-joined Windows box. Cover the real SSPI
-   Negotiate handshake against `wp8080`, real PAC resolution (internal→DIRECT, external→
+   Negotiate handshake against `proxy.example.com`, real PAC resolution (internal→DIRECT, external→
    upstream), real HTTPS via CONNECT through the gateway, and a soak (sequential + concurrent,
-   stable handles/memory). Provide a way to point these at the real `wp8080` and PAC via env.
+   stable handles/memory). Provide a way to point these at the real upstream and PAC via env.
 
 **Windows SSPI in tests without the domain:** provide a loopback SSPI harness in `zicade-win`
 tests — a real `AcceptSecurityContext` (inbound cred) paired with `InitializeSecurityContext`
@@ -302,7 +302,7 @@ reflects live state.
 
 **M6 — Binary integration + live baseline.** `apps/zicade` wires everything; lifecycle +
 graceful shutdown end-to-end. Then, on the domain-joined box, turn the **`ZICADE_LIVE_PROXY=1`**
-suite green against real `wp8080` + real PAC: HTTPS via CONNECT through the gateway, real
+suite green against the real upstream + real PAC: HTTPS via CONNECT through the gateway, real
 Negotiate, internal→DIRECT/external→upstream, and a soak with stable handles/memory.
 
 **M7 (stretch) — Tray/service hosting**, config hot-reload polish, metrics.
@@ -315,8 +315,8 @@ Negotiate, internal→DIRECT/external→upstream, and a soak with stable handles
   on Windows and on a non-Windows CI host (live + Windows-SSPI tests skipped with explicit,
   logged skips off-target).
 - Every LESSON in §8 has a dedicated green regression test.
-- The `ZICADE_LIVE_PROXY=1` suite passes on the domain-joined Windows machine against real
-  `wp8080` + PAC.
+- The `ZICADE_LIVE_PROXY=1` suite passes on the domain-joined Windows machine against the real
+  upstream + PAC.
 - Web UI: config editable + persisted, mutations token-gated, logs stream live, status accurate.
 - No `unsafe` outside `zicade-win`; no SSPI/WinHTTP logic outside `zicade-win`; no file grossly
   oversized; no dead code.
@@ -335,8 +335,8 @@ skips/known-limitations with justification.
 ---
 
 ### Appendix A — environment quick facts
-- Target: domain-joined **Windows 11**, corporate upstream proxy at **`wp8080`** (407 until
-  Negotiate). PAC decides DIRECT vs upstream per host. **Zicade → `wp8080` directly; never via a
+- Target: domain-joined **Windows 11**, corporate upstream proxy at **`proxy.example.com`** (407 until
+  Negotiate). PAC decides DIRECT vs upstream per host. **Zicade → `proxy.example.com` directly; never via a
   jump host.** SSPI can get an outbound cred handle with no stored password. HTTPS = CONNECT
   tunnel; HTTP = forward.
 - Live tests gated behind `ZICADE_LIVE_PROXY=1`; SSPI-real tests skipped off-Windows.

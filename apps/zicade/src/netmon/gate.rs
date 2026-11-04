@@ -211,7 +211,7 @@ mod tests {
     /// from `Direct` by its Debug label ("Upstream").
     fn intended() -> Routing {
         Routing::Upstream(UpstreamTarget {
-            addr: "wp8080:8080".to_owned(),
+            addr: "proxy.example.com:8080".to_owned(),
             auth: UpstreamAuth::None,
         })
     }
@@ -242,9 +242,9 @@ mod tests {
 
     #[test]
     fn on_corp_applies_intended_routing() {
-        let active = Arc::new(Mutex::new(vec!["dy.droot.org".to_owned()]));
+        let active = Arc::new(Mutex::new(vec!["site.ad.example.org".to_owned()]));
         let (gate, handle) = test_gate(
-            corp_config(&["droot.org"]),
+            corp_config(&["ad.example.org"]),
             active,
             Arc::new(AtomicUsize::new(0)),
         );
@@ -260,7 +260,7 @@ mod tests {
     fn off_corp_falls_back_to_direct() {
         let active = Arc::new(Mutex::new(vec!["home.lan".to_owned()]));
         let (gate, handle) = test_gate(
-            corp_config(&["droot.org"]),
+            corp_config(&["ad.example.org"]),
             active,
             Arc::new(AtomicUsize::new(0)),
         );
@@ -273,7 +273,7 @@ mod tests {
         let active = Arc::new(Mutex::new(vec!["home.lan".to_owned()]));
         let transitions = Arc::new(AtomicUsize::new(0));
         let (gate, handle) = test_gate(
-            corp_config(&["droot.org"]),
+            corp_config(&["ad.example.org"]),
             Arc::clone(&active),
             Arc::clone(&transitions),
         );
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(transitions.load(Ordering::SeqCst), 1);
         assert_eq!(label(&handle), "Direct");
 
-        *active.lock().unwrap() = vec!["dy.droot.org".to_owned()];
+        *active.lock().unwrap() = vec!["site.ad.example.org".to_owned()];
         gate.evaluate_now(); // on-corp -> Upstream (transition 2)
         gate.evaluate_now(); // unchanged
         assert_eq!(transitions.load(Ordering::SeqCst), 2);
@@ -294,7 +294,7 @@ mod tests {
     fn reconfigure_disable_applies_configured_routing_and_stops_gating() {
         let active = Arc::new(Mutex::new(vec!["home.lan".to_owned()])); // off-corp
         let (gate, handle) = test_gate(
-            corp_config(&["droot.org"]),
+            corp_config(&["ad.example.org"]),
             Arc::clone(&active),
             Arc::new(AtomicUsize::new(0)),
         );

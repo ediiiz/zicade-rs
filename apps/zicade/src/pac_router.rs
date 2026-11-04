@@ -281,7 +281,7 @@ mod tests {
         let routing = routing_pac(FailPolicy::Error);
         let choice = to_route_choice(
             Ok(PacResult::Proxy {
-                host: "wp8080".to_owned(),
+                host: "proxy.example.com".to_owned(),
                 port: 8080,
             }),
             &routing,
@@ -289,7 +289,7 @@ mod tests {
         .expect("proxy result maps to a route choice");
         match choice {
             RouteChoice::Upstream(target) => {
-                assert_eq!(target.addr, "wp8080:8080");
+                assert_eq!(target.addr, "proxy.example.com:8080");
                 assert_eq!(format!("{:?}", target.auth), "Negotiate");
             }
             RouteChoice::Direct => panic!("expected Upstream, got Direct"),

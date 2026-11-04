@@ -45,7 +45,7 @@ pub struct SspiNegotiate {
 impl SspiNegotiate {
     /// Acquire an outbound credential handle for the logged-in user using the
     /// selected `package`. `target_spn` is the upstream's service principal
-    /// name (e.g. `"HTTP/wp8080"`).
+    /// name (e.g. `"HTTP/proxy.example.com"`).
     pub fn new(target_spn: Option<&str>, package: SspiPackage) -> Result<Self, WinError> {
         #[cfg(windows)]
         {

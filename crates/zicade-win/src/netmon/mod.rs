@@ -18,7 +18,7 @@ use std::time::Duration;
 mod win;
 
 /// The connection-specific DNS suffixes of the network adapters that are
-/// currently up (e.g. `["dy.droot.org"]`). Empty off-Windows, or when no
+/// currently up (e.g. `["site.ad.example.org"]`). Empty off-Windows, or when no
 /// adapter is up / enumeration fails (the gate then falls back to the configured
 /// routing, per design).
 pub fn active_dns_suffixes() -> Vec<String> {

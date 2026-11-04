@@ -6,16 +6,17 @@
 //! network. On a domain-joined, on-corp machine,
 //! `ZICADE_LIVE_PROXY=1 cargo test -p zicade --test live` exercises the real
 //! `407 -> Negotiate/NTLM -> 200` handshake, HTTPS `CONNECT` tunneling,
-//! plain-HTTP forwarding, and a soak / handle-leak regression against
-//! `wp8080:8080`.
+//! plain-HTTP forwarding, and a soak / handle-leak regression against the
+//! upstream named by `ZICADE_LIVE_UPSTREAM`.
 //!
 //! Routing is built through the production `zicade::build_routing` mapper so the
 //! SSPI `AuthFactory` is wired exactly as the shipping binary wires it. Shared
 //! harness/helpers live in [`common`].
 //!
-//! Env knobs (all optional, sensible defaults so the suite is pointable):
+//! Env knobs (the gate and the upstream are required to run; the rest default):
 //! - `ZICADE_LIVE_PROXY`         gate; must equal `"1"` to run.
-//! - `ZICADE_LIVE_UPSTREAM`      corporate upstream `host:port` (default `wp8080:8080`).
+//! - `ZICADE_LIVE_UPSTREAM`      corporate upstream `host:port`, e.g.
+//!   `proxy.example.com:8080` (required when the gate is on).
 //! - `ZICADE_LIVE_EXTERNAL_HOST` CONNECT target `host:port` (default `example.com:443`).
 //! - `ZICADE_LIVE_HTTP_URL`      plain-HTTP forward target (default `http://example.com/`).
 

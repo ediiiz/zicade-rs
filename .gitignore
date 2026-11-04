@@ -1,2 +1,5 @@
 /target
 .claude/worktrees/
+
+# Machine-local cargo config (toolchain paths); see .cargo/config.toml.example.
+/.cargo/config.toml

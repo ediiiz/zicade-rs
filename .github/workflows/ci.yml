@@ -2,10 +2,9 @@ name: ci
 
 # Gate every PR (and pushes to main) on formatting, lints, tests, and a binary
 # build. Like the release job, CI builds with the MSVC toolchain preinstalled on
-# windows-latest and overrides the developer-local GNU settings in
-# .cargo/config.toml: `--target ...-msvc` overrides the pinned GNU target and
-# `build.rustflags=[]` drops the GNU-only `-Cdlltool`. The crates are Windows-only
-# (windows-crate FFI), so all jobs run on Windows.
+# windows-latest; `--target` names it explicitly so the job never depends on the
+# runner's default host triple. The crates are Windows-only (windows-crate FFI),
+# so all jobs run on Windows.
 
 on:
   pull_request:
@@ -20,7 +19,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CARGO_TARGET_DIR: target
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   TARGET: x86_64-pc-windows-msvc
@@ -46,13 +44,13 @@ jobs:
 
       - name: Clippy
         shell: bash
-        run: cargo clippy --workspace --all-targets --target "$TARGET" --config "build.rustflags=[]" -- -D warnings
+        run: cargo clippy --workspace --all-targets --target "$TARGET" -- -D warnings
 
       # Test helpers live outside `#[test]` fns, so unwrap/expect is only
       # forbidden on the shipping targets (not settable per-target in Cargo.toml).
       - name: Clippy (no unwrap/expect outside tests)
         shell: bash
-        run: cargo clippy --workspace --lib --bins --target "$TARGET" --config "build.rustflags=[]" -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+        run: cargo clippy --workspace --lib --bins --target "$TARGET" -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
       - name: File-size guard
         shell: bash
@@ -60,8 +58,8 @@ jobs:
 
       - name: Test
         shell: bash
-        run: cargo test --workspace --locked --target "$TARGET" --config "build.rustflags=[]"
+        run: cargo test --workspace --locked --target "$TARGET"
 
       - name: Build binary (verifies the app-icon embed)
         shell: bash
-        run: cargo build -p zicade --target "$TARGET" --config "build.rustflags=[]"
+        run: cargo build -p zicade --target "$TARGET"
