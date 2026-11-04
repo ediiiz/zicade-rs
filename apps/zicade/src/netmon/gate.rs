@@ -213,6 +213,7 @@ mod tests {
         Routing::Upstream(UpstreamTarget {
             addr: "proxy.example.com:8080".to_owned(),
             auth: UpstreamAuth::None,
+            pool: None,
         })
     }
 

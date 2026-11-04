@@ -7,7 +7,7 @@
 
 use zicade_config::{
     AuthConfig, AuthMode, Config, CorpNetworkConfig, FailPolicy, ListenConfig, LoggingConfig,
-    PacConfig, PacSource, RoutingConfig, RoutingMode, SspiPackage, UpstreamConfig,
+    PacConfig, PacSource, PoolConfig, RoutingConfig, RoutingMode, SspiPackage, UpstreamConfig,
 };
 
 /// Re-check interval used when the field is blank or zero.
@@ -63,6 +63,8 @@ pub struct ConfigForm {
     /// Comma- or newline-separated.
     pub corp_suffixes: String,
     pub corp_poll_seconds: String,
+    /// Not on the form: carried through unchanged so a save keeps it.
+    pub pool: PoolConfig,
     pub log_level: String,
     pub log_format: String,
 }
@@ -97,6 +99,7 @@ impl ConfigForm {
             corp_enabled: corp.enabled,
             corp_suffixes: corp.dns_suffixes.join(", "),
             corp_poll_seconds: corp.poll_seconds.to_string(),
+            pool: routing.pool,
             log_level: config.logging.level.clone(),
             log_format: config.logging.format.clone(),
         }
@@ -120,6 +123,7 @@ impl ConfigForm {
                 },
                 pac: (self.mode == RoutingMode::Pac).then(|| self.pac()),
                 corp_network: if gated { self.corp()? } else { None },
+                pool: self.pool,
             },
             logging: LoggingConfig {
                 level: self.log_level.trim().to_owned(),

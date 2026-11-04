@@ -3,6 +3,7 @@
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
 pub mod client;
+pub mod counting_upstream;
 pub mod origin;
 pub mod scheme_fake;
 pub mod upstream_fake;
@@ -12,13 +13,15 @@ use std::time::Duration;
 
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use zicade_proxy::{ProxyError, ProxyMetrics, ProxyServer, Routing};
+use zicade_proxy::{ProxyError, ProxyMetrics, ProxyServer, Routing, RoutingHandle};
 
 /// A proxy running on an ephemeral loopback port, with a handle to shut it down
 /// and inspect its live metrics.
 pub struct TestProxy {
     pub addr: SocketAddr,
     pub metrics: ProxyMetrics,
+    /// The live routing, for tests that swap it mid-run.
+    pub routing: RoutingHandle,
     shutdown: Option<oneshot::Sender<()>>,
     join: JoinHandle<Result<(), ProxyError>>,
 }
@@ -54,6 +57,7 @@ impl TestProxy {
     fn start(server: ProxyServer) -> Self {
         let addr = server.local_addr();
         let metrics = server.metrics();
+        let routing = server.routing_handle();
         let (tx, rx) = oneshot::channel::<()>();
         let join = tokio::spawn(server.serve(async move {
             let _ = rx.await;
@@ -61,6 +65,7 @@ impl TestProxy {
         Self {
             addr,
             metrics,
+            routing,
             shutdown: Some(tx),
             join,
         }

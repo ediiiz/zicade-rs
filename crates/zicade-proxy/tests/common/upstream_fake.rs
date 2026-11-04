@@ -216,7 +216,7 @@ async fn serve_basic(mut stream: TcpStream, expected: &str) {
 
 /// Whether the request head carries `Proxy-Authorization: <expected>` (header
 /// name case-insensitive, value exact).
-fn head_has_authorization(head: &str, expected: &str) -> bool {
+pub fn head_has_authorization(head: &str, expected: &str) -> bool {
     head.split("\r\n").any(|line| {
         line.split_once(':')
             .map(|(k, v)| {

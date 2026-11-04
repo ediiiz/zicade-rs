@@ -6,6 +6,7 @@ use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use zicade_config::PoolConfig;
 
 use crate::choices::{
     AUTH_MODES, FAIL_POLICIES, Item, LOG_FORMATS, LOG_LEVELS, PAC_SOURCES, ROUTING_MODES,
@@ -73,6 +74,8 @@ pub(super) struct Fields {
     pub corp_poll_seconds: Text,
     pub log_level: Choice,
     pub log_format: Choice,
+    /// Not on screen; kept from the loaded config so a save does not reset it.
+    pub pool: PoolConfig,
 }
 
 /// Builds widgets on a view and re-renders it on every edit: choices decide
@@ -161,6 +164,7 @@ impl<V: 'static> Builder<'_, '_, V> {
             corp_poll_seconds: self.text(&form.corp_poll_seconds, "30"),
             log_level: self.choice(&LOG_LEVELS, &form.log_level),
             log_format: self.choice(&LOG_FORMATS, &form.log_format),
+            pool: form.pool,
         }
     }
 }
@@ -211,6 +215,7 @@ impl Fields {
             corp_enabled,
             corp_suffixes: text(&self.corp_suffixes, cx),
             corp_poll_seconds: text(&self.corp_poll_seconds, cx),
+            pool: self.pool,
             log_level: self.log_level.name(cx),
             log_format: self.log_format.name(cx),
         }
@@ -233,6 +238,7 @@ impl Fields {
         set(&self.corp_poll_seconds, &form.corp_poll_seconds, window, cx);
         self.log_level.pick(&form.log_level, window, cx);
         self.log_format.pick(&form.log_format, window, cx);
+        self.pool = form.pool;
     }
 }
 

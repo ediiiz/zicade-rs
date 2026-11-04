@@ -159,6 +159,7 @@ mod tests {
         handle.set(Routing::Upstream(UpstreamTarget {
             addr: "127.0.0.1:8080".to_owned(),
             auth: UpstreamAuth::None,
+            pool: None,
         }));
         assert_eq!(format!("{:?}", handle.current()), "Upstream");
     }
@@ -168,6 +169,7 @@ mod tests {
         let handle = RoutingHandle::new(Routing::Upstream(UpstreamTarget {
             addr: "127.0.0.1:8080".to_owned(),
             auth: UpstreamAuth::None,
+            pool: None,
         }));
         let poisoner = handle.clone();
         let _ = std::thread::spawn(move || {
@@ -196,6 +198,7 @@ mod tests {
         handle.set(Routing::Upstream(UpstreamTarget {
             addr: "127.0.0.1:8080".to_owned(),
             auth: UpstreamAuth::None,
+            pool: None,
         }));
         assert_eq!(format!("{:?}", server.routing.current()), "Upstream");
     }

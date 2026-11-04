@@ -40,4 +40,8 @@ pub enum ConfigError {
     /// or a zero poll interval).
     #[error("routing.corpNetwork is invalid: {reason}")]
     CorpNetwork { reason: &'static str },
+
+    /// `routing.pool` is enabled but its limits are out of range.
+    #[error("routing.pool is invalid: {reason}")]
+    Pool { reason: &'static str },
 }

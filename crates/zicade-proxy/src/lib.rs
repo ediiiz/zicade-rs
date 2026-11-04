@@ -17,4 +17,7 @@ pub use error::ProxyError;
 pub use metrics::ProxyMetrics;
 pub use server::{ProxyServer, RoutingHandle};
 pub use tracker::{ConnectionKind, ConnectionSnapshot, ConnectionState};
-pub use upstream::{AuthFactory, PacRouter, RouteChoice, Routing, UpstreamAuth, UpstreamTarget};
+pub use upstream::{
+    AuthFactory, PacRouter, PoolConfig, RouteChoice, Routing, UpstreamAuth, UpstreamPool,
+    UpstreamPools, UpstreamTarget,
+};

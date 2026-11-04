@@ -168,3 +168,27 @@ pub(crate) async fn write_all(stream: &mut TcpStream, bytes: &[u8]) -> io::Resul
     stream.write_all(bytes).await?;
     stream.flush().await
 }
+
+/// Whether a parked socket is still open and silent. It has never carried a
+/// request, so it has nothing legitimate to read: bytes mean the peer is
+/// talking out of turn and EOF means it closed; either way it is not reused.
+/// One non-blocking read of one byte, so a chatty peer cannot hold us here.
+pub(crate) fn is_idle_and_open(stream: &TcpStream) -> bool {
+    let mut byte = [0u8; 1];
+    matches!(stream.try_read(&mut byte), Err(err) if err.kind() == io::ErrorKind::WouldBlock)
+}
+
+/// Wait until the upstream has sent at least one response byte, without
+/// consuming it. Fails if the connection closes or resets first, which on a
+/// reused socket means it died while parked rather than that anything was
+/// refused.
+pub(crate) async fn await_response(stream: &TcpStream) -> io::Result<()> {
+    let mut byte = [0u8; 1];
+    match stream.peek(&mut byte).await? {
+        0 => Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "upstream closed before responding",
+        )),
+        _ => Ok(()),
+    }
+}

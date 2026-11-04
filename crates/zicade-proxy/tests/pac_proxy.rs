@@ -79,6 +79,7 @@ async fn pac_upstream_connect_runs_negotiate_handshake() {
         Ok(RouteChoice::Upstream(UpstreamTarget {
             addr: upstream_addr.clone(),
             auth: negotiate_factory(),
+            pool: None,
         }))
     });
     let proxy = TestProxy::spawn_with_routing(Routing::Pac(router)).await;
@@ -101,6 +102,7 @@ async fn pac_upstream_http_forward_runs_negotiate_handshake() {
         Ok(RouteChoice::Upstream(UpstreamTarget {
             addr: upstream_addr.clone(),
             auth: negotiate_factory(),
+            pool: None,
         }))
     });
     let proxy = TestProxy::spawn_with_routing(Routing::Pac(router)).await;

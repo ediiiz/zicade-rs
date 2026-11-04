@@ -2,7 +2,7 @@
 //! an injected [`ValidationCtx`] so they are testable on any OS.
 
 use crate::error::ConfigError;
-use crate::model::{AuthConfig, AuthMode, Config, CorpNetworkConfig, RoutingMode};
+use crate::model::{AuthConfig, AuthMode, Config, CorpNetworkConfig, PoolConfig, RoutingMode};
 
 /// Platform capabilities the validator needs. Injected so tests can exercise
 /// both the Windows and non-Windows branches deterministically.
@@ -60,6 +60,7 @@ impl Config {
         if let Some(corp) = &self.routing.corp_network {
             check_corp_network(corp)?;
         }
+        check_pool(&self.routing.pool)?;
         Ok(())
     }
 }
@@ -79,6 +80,24 @@ fn check_corp_network(corp: &CorpNetworkConfig) -> Result<(), ConfigError> {
     if corp.poll_seconds == 0 {
         return Err(ConfigError::CorpNetwork {
             reason: "pollSeconds must be greater than zero",
+        });
+    }
+    Ok(())
+}
+
+/// Validate the socket pool. Only enforced when `enabled`, like the gate.
+fn check_pool(pool: &PoolConfig) -> Result<(), ConfigError> {
+    if !pool.enabled {
+        return Ok(());
+    }
+    if pool.min_idle == 0 || pool.min_idle > PoolConfig::MAX_MIN_IDLE {
+        return Err(ConfigError::Pool {
+            reason: "minIdle must be between 1 and 16",
+        });
+    }
+    if pool.idle_timeout_seconds == 0 {
+        return Err(ConfigError::Pool {
+            reason: "idleTimeoutSeconds must be greater than zero",
         });
     }
     Ok(())

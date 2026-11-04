@@ -19,6 +19,7 @@ async fn proxy_via(upstream: std::net::SocketAddr) -> TestProxy {
     TestProxy::spawn_with_routing(Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: UpstreamAuth::None,
+        pool: None,
     }))
     .await
 }
