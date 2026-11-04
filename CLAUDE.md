@@ -19,10 +19,12 @@ cargo test --workspace
 bash scripts/check_file_size.sh
 ```
 
-Locally this builds with the w64devkit GNU toolchain pinned in
-`.cargo/config.toml`; CI uses MSVC (see `ci.yml`). A link error about `ld` or
-`dlltool` is a config problem: fix it in `.cargo/config.toml`, never by editing
-the global PATH.
+The MSVC toolchain (the default on a standard Windows Rust install, and what CI
+uses; see `ci.yml`) builds with no extra config. For the w64devkit GNU
+toolchain, copy `.cargo/config.toml.example` to `.cargo/config.toml` (gitignored,
+machine-local) and edit its paths. A link error about `ld` or `dlltool` is a
+config problem: fix it in your `.cargo/config.toml`, never by editing the global
+PATH.
 
 ## Working agreement
 
