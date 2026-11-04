@@ -191,6 +191,7 @@ async fn invalid_config_fails_fast() {
             upstream: None,
             pac: None,
             corp_network: None,
+            pool: zicade_config::PoolConfig::default(),
         },
         ..Default::default()
     };
@@ -248,6 +249,7 @@ fn build_routing_maps_direct_and_upstream() {
             }),
             pac: None,
             corp_network: None,
+            pool: zicade_config::PoolConfig::default(),
         },
         ..Default::default()
     };

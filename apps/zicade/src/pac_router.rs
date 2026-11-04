@@ -271,6 +271,7 @@ mod tests {
             upstream: None,
             pac: Some(pac),
             corp_network: None,
+            pool: zicade_config::PoolConfig::default(),
         }
     }
 

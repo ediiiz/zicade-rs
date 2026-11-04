@@ -2,8 +2,8 @@
 //! [`Config`] is where typos, blank passwords, and hidden sections are decided.
 
 use zicade_config::{
-    AuthConfig, AuthMode, Config, CorpNetworkConfig, FailPolicy, PacConfig, PacSource, RoutingMode,
-    SspiPackage, UpstreamConfig,
+    AuthConfig, AuthMode, Config, CorpNetworkConfig, FailPolicy, PacConfig, PacSource, PoolConfig,
+    RoutingMode, SspiPackage, UpstreamConfig,
 };
 use zicade_ui::form_model::ConfigForm;
 
@@ -51,6 +51,24 @@ fn an_unedited_form_gives_back_the_config_it_was_built_from() {
         let form = ConfigForm::from_config(&cfg);
         assert_eq!(form.to_config(), Ok(cfg));
     }
+}
+
+/// The form has no pool fields, so a save that edits something else must
+/// write back the pool settings the file already had, not reset them.
+#[test]
+fn a_save_keeps_the_pool_settings_the_form_does_not_show() {
+    let mut cfg = upstream_config();
+    cfg.routing.pool = PoolConfig {
+        enabled: true,
+        min_idle: 4,
+        idle_timeout_seconds: 15,
+    };
+    let mut form = ConfigForm::from_config(&cfg);
+    form.upstream_port = "3128".to_owned();
+
+    let saved = form.to_config().unwrap();
+    assert_eq!(saved.routing.upstream.unwrap().port, 3128);
+    assert_eq!(saved.routing.pool, cfg.routing.pool);
 }
 
 /// The form only ever sees redacted configs; a blank password must reach

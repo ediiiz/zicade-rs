@@ -93,6 +93,9 @@ pub struct RoutingConfig {
         rename = "corpNetwork"
     )]
     pub corp_network: Option<CorpNetworkConfig>,
+    /// Prewarmed upstream sockets for `CONNECT`. Off unless configured.
+    #[serde(default, skip_serializing_if = "PoolConfig::is_default")]
+    pub pool: PoolConfig,
 }
 
 impl RoutingConfig {
@@ -116,6 +119,60 @@ pub struct UpstreamConfig {
     pub port: u16,
     #[serde(default)]
     pub auth: AuthConfig,
+}
+
+/// Prewarmed upstream sockets (`routing.pool`).
+///
+/// When enabled, the proxy keeps up to `minIdle` idle TCP connections open to
+/// each upstream proxy a `CONNECT` has gone to, so the next `CONNECT` skips the
+/// TCP dial. Those sockets have never carried a request: every `CONNECT` still
+/// runs its own full proxy-authentication handshake, and a socket that has
+/// carried one is never pooled. **Disabled by default**, because it holds
+/// connections open to the gateway while the machine is idle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PoolConfig {
+    /// Whether to prewarm sockets at all. Default `false`.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Idle sockets kept ready per upstream. Default 2.
+    #[serde(default = "default_min_idle", rename = "minIdle")]
+    pub min_idle: usize,
+    /// How long an idle socket is kept before it is closed and replaced, so the
+    /// pool never hands out a connection the gateway may have silently
+    /// dropped. Default 30.
+    #[serde(
+        default = "default_idle_timeout_seconds",
+        rename = "idleTimeoutSeconds"
+    )]
+    pub idle_timeout_seconds: u64,
+}
+
+impl PoolConfig {
+    /// Upper bound on [`Self::min_idle`]: the pool trims a dial, it must not
+    /// hold a meaningful share of the gateway's connection table.
+    pub const MAX_MIN_IDLE: usize = 16;
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl Default for PoolConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_idle: default_min_idle(),
+            idle_timeout_seconds: default_idle_timeout_seconds(),
+        }
+    }
+}
+
+fn default_min_idle() -> usize {
+    2
+}
+
+fn default_idle_timeout_seconds() -> u64 {
+    30
 }
 
 /// Where the PAC script comes from.

@@ -67,6 +67,7 @@ fn upstream_negotiate_config() -> Config {
             }),
             pac: None,
             corp_network: None,
+            pool: zicade_config::PoolConfig::default(),
         },
         ..Default::default()
     }
