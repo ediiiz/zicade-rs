@@ -218,10 +218,10 @@ fn to_route_choice(
                 io::Error::other("PAC selected a proxy but no [routing.pac] config is present")
             })?;
             let auth = build_auth(&upstream.auth, &host);
-            Ok(RouteChoice::Upstream(UpstreamTarget {
-                addr: format!("{host}:{port}"),
+            Ok(RouteChoice::Upstream(UpstreamTarget::new(
+                format!("{host}:{port}"),
                 auth,
-            }))
+            )))
         }
         Err(err) => match routing
             .pac
@@ -270,6 +270,7 @@ mod tests {
             mode: RoutingMode::Pac,
             upstream: None,
             pac: Some(pac),
+            pool: zicade_config::PoolConfig::default(),
             corp_network: None,
         }
     }

@@ -18,10 +18,10 @@ use zicade_proxy::{Routing, UpstreamAuth, UpstreamTarget};
 #[tokio::test]
 async fn connect_through_upstream_negotiate_tunnels() {
     let upstream = spawn_negotiate_upstream().await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: negotiate_factory(),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        negotiate_factory(),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     // The CONNECT target is opaque to the fake; the 3-leg 407 dance must
@@ -39,10 +39,10 @@ async fn connect_through_upstream_negotiate_tunnels() {
 #[tokio::test]
 async fn http_forward_through_upstream_negotiate_echoes_body() {
     let upstream = spawn_negotiate_upstream().await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: negotiate_factory(),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        negotiate_factory(),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     let body = b"post-body-through-upstream".to_vec();
@@ -70,10 +70,10 @@ const GOOD_BASIC: &str = "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==";
 #[tokio::test]
 async fn connect_through_upstream_basic_tunnels() {
     let upstream = spawn_basic_upstream(GOOD_BASIC).await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: basic_auth(GOOD_BASIC),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        basic_auth(GOOD_BASIC),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     let mut tunnel = proxy_connect(proxy.addr, "example.com:443").await;
@@ -89,10 +89,10 @@ async fn connect_through_upstream_basic_tunnels() {
 #[tokio::test]
 async fn http_forward_through_upstream_basic_echoes_body() {
     let upstream = spawn_basic_upstream(GOOD_BASIC).await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: basic_auth(GOOD_BASIC),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        basic_auth(GOOD_BASIC),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     let body = b"post-body-basic-upstream".to_vec();
@@ -119,10 +119,10 @@ async fn http_forward_through_upstream_basic_wrong_credentials_fails_cleanly() {
     // The upstream only accepts GOOD_BASIC; the proxy is configured with a
     // different credential, so the handshake must fail cleanly (502), not loop.
     let upstream = spawn_basic_upstream(GOOD_BASIC).await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: basic_auth("Basic d3Jvbmc6Y3JlZHM="),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        basic_auth("Basic d3Jvbmc6Y3JlZHM="),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     let resp = proxy_http(
@@ -149,10 +149,10 @@ async fn connect_through_upstream_basic_wrong_credentials_fails_cleanly() {
     use tokio::net::TcpStream;
 
     let upstream = spawn_basic_upstream(GOOD_BASIC).await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: basic_auth("Basic d3Jvbmc6Y3JlZHM="),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        basic_auth("Basic d3Jvbmc6Y3JlZHM="),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
@@ -190,10 +190,10 @@ async fn connect_through_upstream_basic_wrong_credentials_fails_cleanly() {
 #[tokio::test]
 async fn connect_through_upstream_no_auth() {
     let upstream = spawn_noauth_upstream().await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: UpstreamAuth::None,
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        UpstreamAuth::None,
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     let mut tunnel = proxy_connect(proxy.addr, "example.com:443").await;
@@ -221,10 +221,10 @@ async fn connect_through_upstream_no_auth() {
 #[tokio::test]
 async fn sequential_forward_requests_each_authenticate_independently() {
     let upstream = spawn_negotiate_upstream().await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: negotiate_factory(),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        negotiate_factory(),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     for i in 0..8u32 {
@@ -252,10 +252,10 @@ async fn sequential_forward_requests_each_authenticate_independently() {
 #[tokio::test]
 async fn forward_through_looping_upstream_hits_leg_cap_without_hanging() {
     let upstream = spawn_looping_negotiate_upstream().await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: infinite_negotiate_factory(),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        infinite_negotiate_factory(),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     let resp = tokio::time::timeout(
@@ -285,10 +285,10 @@ async fn forward_through_looping_upstream_hits_leg_cap_without_hanging() {
 #[tokio::test]
 async fn sequential_connect_tunnels_each_authenticate_independently() {
     let upstream = spawn_negotiate_upstream().await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: negotiate_factory(),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        negotiate_factory(),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     for i in 0..3u32 {
@@ -311,10 +311,10 @@ async fn sequential_connect_tunnels_each_authenticate_independently() {
 #[tokio::test]
 async fn forward_burst_drains_connections_and_holds_handle_count() {
     let upstream = spawn_negotiate_upstream().await;
-    let routing = Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: negotiate_factory(),
-    });
+    let routing = Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        negotiate_factory(),
+    ));
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
     // Warm up so lazily-created OS handles are excluded from the baseline.

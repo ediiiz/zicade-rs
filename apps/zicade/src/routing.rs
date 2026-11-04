@@ -6,12 +6,13 @@
 //! [`crate::pac_router`], which injects a `PacRouter` closure backed by WinHTTP.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use zicade_auth::header::build_basic_authorization;
 use zicade_auth::{AuthError, UpstreamAuthenticator};
 use zicade_config::{AuthConfig, AuthMode, Config, RoutingMode};
-use zicade_proxy::{AuthFactory, Routing, UpstreamAuth, UpstreamTarget};
+use zicade_proxy::{AuthFactory, PoolConfig, Routing, UpstreamAuth, UpstreamPool, UpstreamTarget};
 use zicade_win::SspiNegotiate;
 
 /// Build the proxy [`Routing`] for the given config.
@@ -32,7 +33,42 @@ fn build_upstream(config: &Config) -> anyhow::Result<Routing> {
     let addr = format!("{}:{}", up.host, up.port);
     let auth = build_auth(&up.auth, &up.host);
     tracing::info!(upstream = %addr, auth = ?up.auth.mode, "routing via upstream proxy");
-    Ok(Routing::Upstream(UpstreamTarget { addr, auth }))
+
+    // The pool lives for the lifetime of this routing snapshot and is shared by
+    // every connection that clones it. Without one, each request pays a fresh
+    // TCP dial to the gateway (one RTT) before its CONNECT even starts.
+    //
+    // A tunnelled socket is spliced away and never returns, so the pool cannot
+    // refill itself: it is filled by a background prewarm task instead.
+    let mut target = UpstreamTarget::new(addr, auth);
+    if config.routing.pool.enabled {
+        let pool = Arc::new(UpstreamPool::new(
+            target.addr.clone(),
+            PoolConfig {
+                max_idle: config.routing.pool.max_idle,
+                idle_timeout: Duration::from_secs(config.routing.pool.idle_timeout_secs),
+                min_idle: config.routing.pool.min_idle,
+                prewarm_interval: Duration::from_millis(config.routing.pool.prewarm_interval_ms),
+            },
+        ));
+        tracing::info!(
+            max_idle = config.routing.pool.max_idle,
+            min_idle = config.routing.pool.min_idle,
+            idle_timeout_secs = config.routing.pool.idle_timeout_secs,
+            "upstream socket prewarm enabled (saves the TCP dial, not the tunnel)"
+        );
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(zicade_proxy::spawn_prewarm(Arc::clone(&pool)));
+        } else {
+            // Built outside a runtime (unit tests calling this synchronously):
+            // skip prewarm, the pool simply stays cold.
+            tracing::debug!("no tokio runtime; upstream socket prewarm not started");
+        }
+        target = target.with_pool(pool);
+    } else {
+        tracing::info!("upstream socket prewarm disabled");
+    }
+    Ok(Routing::Upstream(target))
 }
 
 /// Map an [`AuthConfig`] onto the proxy's [`UpstreamAuth`]. `host` is the proxy

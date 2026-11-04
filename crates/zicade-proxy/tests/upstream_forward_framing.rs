@@ -16,10 +16,10 @@ use tokio::sync::Notify;
 use zicade_proxy::{Routing, UpstreamAuth, UpstreamTarget};
 
 async fn proxy_via(upstream: std::net::SocketAddr) -> TestProxy {
-    TestProxy::spawn_with_routing(Routing::Upstream(UpstreamTarget {
-        addr: upstream.to_string(),
-        auth: UpstreamAuth::None,
-    }))
+    TestProxy::spawn_with_routing(Routing::Upstream(UpstreamTarget::new(
+        upstream.to_string(),
+        UpstreamAuth::None,
+    )))
     .await
 }
 

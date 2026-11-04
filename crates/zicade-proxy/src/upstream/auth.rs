@@ -30,7 +30,10 @@ impl UpstreamAuthenticator for BoxAuth {
 /// ready-made `Basic <b64>` value.
 pub(super) enum AuthState {
     None,
-    Basic { credentials: String, sent: bool },
+    Basic {
+        credentials: String,
+        sent: bool,
+    },
     /// `scheme` is learned from the gateway's first `Proxy-Authenticate` and
     /// pinned for the rest of this connection's handshake.
     Negotiate {

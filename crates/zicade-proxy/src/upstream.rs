@@ -7,8 +7,11 @@
 //! connection — a pooled hyper client cannot express that.
 
 mod auth;
+mod connect;
+mod pool;
 mod wire;
 
+pub use pool::{PoolConfig, UpstreamPool, spawn_prewarm};
 use std::fmt;
 use std::future::Future;
 use std::io;
@@ -31,6 +34,7 @@ use zicade_auth::UpstreamAuthenticator;
 use crate::http_forward::{BoxedBody, ForwardError};
 
 use auth::AuthState;
+pub(crate) use connect::connect_via_upstream;
 
 /// Bound on handshake legs, guarding against a looping/hostile upstream.
 const MAX_LEGS: u32 = 12;
@@ -77,6 +81,68 @@ pub struct UpstreamTarget {
     pub addr: String,
     /// How to authenticate to it.
     pub auth: UpstreamAuth,
+    /// Optional shared pool of idle sockets to this upstream.
+    ///
+    /// Cloning an `UpstreamTarget` clones the `Arc`, so every connection served
+    /// from the same routing snapshot draws from one pool — that is what makes
+    /// the pool worth having under a browser's parallel request load.
+    pub pool: Option<Arc<UpstreamPool>>,
+}
+
+impl UpstreamTarget {
+    /// A target with no connection pooling (the original per-request dial).
+    #[must_use]
+    pub fn new(addr: impl Into<String>, auth: UpstreamAuth) -> Self {
+        Self {
+            addr: addr.into(),
+            auth,
+            pool: None,
+        }
+    }
+
+    /// Attach a shared idle-socket pool.
+    #[must_use]
+    pub fn with_pool(mut self, pool: Arc<UpstreamPool>) -> Self {
+        self.pool = Some(pool);
+        self
+    }
+
+    /// Take an idle socket for this upstream, or dial a fresh one.
+    ///
+    /// Returns whether the socket came from the pool: only a reused socket can
+    /// fail for reasons a fresh dial would not have hit, so only then is a
+    /// single retry worthwhile.
+    async fn dial(&self) -> io::Result<(TcpStream, bool)> {
+        if let Some(pool) = &self.pool {
+            if let Some(stream) = pool.take(&self.addr) {
+                return Ok((stream, true));
+            }
+        }
+        Ok((TcpStream::connect(&self.addr).await?, false))
+    }
+
+    /// Dial a fresh socket, bypassing the pool entirely.
+    ///
+    /// Used for the one retry after a pooled socket failed, so the retry can
+    /// never pick up another stale entry.
+    async fn dial_fresh(&self) -> io::Result<(TcpStream, bool)> {
+        Ok((TcpStream::connect(&self.addr).await?, false))
+    }
+
+    /// Hand a still-usable socket back to the pool.
+    ///
+    /// Only called on paths that end a handshake without establishing a tunnel:
+    /// an authed socket is a wasted round trip otherwise, and the next CONNECT
+    /// can reuse the socket (and whatever auth state the gateway kept).
+    ///
+    /// A successful handshake is **not** recycled — its socket is spliced away
+    /// as a tunnel and never comes back. The pool is refilled by the prewarm
+    /// task instead (see [`pool::spawn_prewarm`]).
+    fn recycle(&self, stream: TcpStream) {
+        if let Some(pool) = &self.pool {
+            pool.put(&self.addr, stream);
+        }
+    }
 }
 
 /// The per-request routing decision a [`PacRouter`] produces. Mirrors the fixed
@@ -119,104 +185,6 @@ impl fmt::Debug for Routing {
             Self::Pac(_) => f.write_str("Pac"),
         }
     }
-}
-
-/// Connect to the upstream proxy and establish an authenticated `CONNECT`
-/// tunnel to `target`, returning the raw stream ready to splice. The dial and
-/// the full handshake are bounded by [`HANDSHAKE_TIMEOUT`].
-pub(crate) async fn connect_via_upstream(
-    upstream_addr: &str,
-    target: &str,
-    auth: &UpstreamAuth,
-) -> io::Result<TcpStream> {
-    match tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        connect_handshake(upstream_addr, target, auth),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            format!(
-                "upstream CONNECT handshake with {upstream_addr} timed out after {}s",
-                HANDSHAKE_TIMEOUT.as_secs()
-            ),
-        )),
-    }
-}
-
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "the multi-leg 407 loop plus per-leg tracing reads as one handshake"
-)]
-async fn connect_handshake(
-    upstream_addr: &str,
-    target: &str,
-    auth: &UpstreamAuth,
-) -> io::Result<TcpStream> {
-    let mut stream = TcpStream::connect(upstream_addr).await?;
-    if let Err(err) = stream.set_nodelay(true) {
-        tracing::debug!(error = %err, "failed to set TCP_NODELAY on upstream socket");
-    }
-    tracing::debug!(
-        upstream = upstream_addr,
-        target,
-        "upstream CONNECT handshake begin"
-    );
-    let mut auth_state = AuthState::new(auth);
-    let mut header = auth_state.initial_header();
-
-    for leg in 0..MAX_LEGS {
-        let head = connect_request(target, header.as_deref());
-        wire::write_all(&mut stream, head.as_bytes()).await?;
-        let (status, headers) = wire::read_head(&mut stream).await?;
-        tracing::trace!(
-            leg,
-            status,
-            target,
-            authed = header.is_some(),
-            "upstream CONNECT leg response"
-        );
-
-        match status {
-            200 => {
-                tracing::debug!(
-                    upstream = upstream_addr,
-                    target,
-                    legs = leg + 1,
-                    "upstream CONNECT tunnel authorized"
-                );
-                return Ok(stream);
-            }
-            407 => {
-                // Drain any body so the connection is clean for the next leg.
-                wire::drain_body(&mut stream, &headers).await?;
-                header = Some(auth_state.on_challenge(&headers)?);
-            }
-            other => {
-                wire::drain_body(&mut stream, &headers).await?;
-                return Err(io::Error::other(format!(
-                    "upstream refused CONNECT with status {other}"
-                )));
-            }
-        }
-    }
-    Err(io::Error::other("upstream handshake exhausted legs"))
-}
-
-fn connect_request(target: &str, auth_header: Option<&str>) -> String {
-    // Match what browsers and Winfoom send to the upstream proxy: an explicit
-    // `Proxy-Connection: keep-alive` on the CONNECT. Some corporate gateways
-    // otherwise apply a shorter/closing tunnel policy, which can drop long
-    // uploads mid-stream.
-    let mut head =
-        format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nProxy-Connection: keep-alive\r\n");
-    if let Some(value) = auth_header {
-        head.push_str(&format!("Proxy-Authorization: {value}\r\n"));
-    }
-    head.push_str("\r\n");
-    head
 }
 
 /// Forward a plain HTTP request through the upstream proxy (absolute-form),

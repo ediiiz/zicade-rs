@@ -76,10 +76,10 @@ async fn pac_upstream_connect_runs_negotiate_handshake() {
     let upstream_addr = upstream.to_string();
     // External: the resolver selects the upstream, carrying its auth.
     let router = router_from(move |_url| {
-        Ok(RouteChoice::Upstream(UpstreamTarget {
-            addr: upstream_addr.clone(),
-            auth: negotiate_factory(),
-        }))
+        Ok(RouteChoice::Upstream(UpstreamTarget::new(
+            upstream_addr.clone(),
+            negotiate_factory(),
+        )))
     });
     let proxy = TestProxy::spawn_with_routing(Routing::Pac(router)).await;
 
@@ -98,10 +98,10 @@ async fn pac_upstream_http_forward_runs_negotiate_handshake() {
     let upstream = spawn_negotiate_upstream().await;
     let upstream_addr = upstream.to_string();
     let router = router_from(move |_url| {
-        Ok(RouteChoice::Upstream(UpstreamTarget {
-            addr: upstream_addr.clone(),
-            auth: negotiate_factory(),
-        }))
+        Ok(RouteChoice::Upstream(UpstreamTarget::new(
+            upstream_addr.clone(),
+            negotiate_factory(),
+        )))
     });
     let proxy = TestProxy::spawn_with_routing(Routing::Pac(router)).await;
 

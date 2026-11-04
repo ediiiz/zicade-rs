@@ -4,6 +4,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -110,6 +111,68 @@ Connection: keep-alive\r\n\r\n"
         let _ = stream.write_all(&body).await;
         return;
     }
+}
+
+/// Spawn an upstream that accepts connections, completes the handshake, and
+/// then **refuses** the CONNECT with a 403 before closing.
+///
+/// Used to prove a "gateway said no" failure costs exactly one dial: the
+/// listener is live so dials really connect (a closed port would be refused by
+/// the kernel before any accept and so could not distinguish a retry), and the
+/// returned counter says how many connections were made.
+pub async fn spawn_refusing_connect_upstream() -> (SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&accepted);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            counter.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                // Answer any number of 407 legs with a bare Negotiate offer,
+                // then refuse the terminal CONNECT.
+                loop {
+                    let Some((head, _body)) = read_request(&mut stream).await else {
+                        return;
+                    };
+                    let has_auth = head.to_ascii_lowercase().contains("proxy-authorization");
+                    let resp = if has_auth {
+                        "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_string()
+                    } else {
+                        R407_BARE.to_string()
+                    };
+                    if stream.write_all(resp.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    if has_auth {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    (addr, accepted)
+}
+
+/// Spawn the same Negotiate upstream as [`spawn_negotiate_upstream`], plus a
+/// counter of how many TCP connections it has accepted.
+///
+/// Lets a test assert on *dial count* rather than wall-clock time: "the proxy
+/// retried once with a fresh dial" is exactly "the fake saw two connections",
+/// and "a cold-dial failure is not retried" is exactly one.
+pub async fn spawn_counted_negotiate_upstream() -> (SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&accepted);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            counter.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(serve_negotiate(stream));
+        }
+    });
+    (addr, accepted)
 }
 
 /// A scripted authenticator that never runs out of tokens, so the *proxy's*

@@ -93,6 +93,11 @@ pub struct RoutingConfig {
         rename = "corpNetwork"
     )]
     pub corp_network: Option<CorpNetworkConfig>,
+    /// Idle socket pool for upstream dials. On by default: it removes one RTT
+    /// (the TCP handshake to the gateway) from every request that follows a
+    /// recent one. Set `"enabled": false` to restore the per-request dial.
+    #[serde(default)]
+    pub pool: PoolConfig,
 }
 
 impl RoutingConfig {
@@ -116,6 +121,51 @@ pub struct UpstreamConfig {
     pub port: u16,
     #[serde(default)]
     pub auth: AuthConfig,
+}
+
+/// Idle-socket pool for upstream connections.
+///
+/// The pool only ever holds sockets that are *not* tunnelled: a `CONNECT`ed
+/// socket belongs to one destination for its whole life. What is reused is the
+/// TCP handshake to the gateway — worth one RTT (49–78 ms on the access points
+/// we measured) on every request that follows a recent one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PoolConfig {
+    /// Whether to prewarm idle upstream sockets at all.
+    ///
+    /// This only saves the TCP handshake to the upstream they are dialed to;
+    /// it can never reuse an established `CONNECT` tunnel, so treat it as a
+    /// latency trim, not a throughput multiplier.
+    pub enabled: bool,
+    /// Maximum idle sockets kept per upstream address.
+    pub max_idle: usize,
+    /// How long an idle socket may sit unused before it is dropped, in seconds.
+    /// Keep this below the gateway's own idle reaping.
+    pub idle_timeout_secs: u64,
+    /// Watermark the prewarm task keeps the pool at. Kept below `max_idle` so
+    /// an idle machine never holds the gateway's whole connection table open.
+    pub min_idle: usize,
+    /// Minimum spacing between prewarm dials, in milliseconds, so a dead
+    /// gateway costs one dial per interval instead of a tight retry loop.
+    pub prewarm_interval_ms: u64,
+}
+
+impl Default for PoolConfig {
+    fn default() -> Self {
+        // 32 covers a browser's parallelism (6–8 per origin, a handful of
+        // origins) with headroom while staying small. 20 s is below both the
+        // gateway's idle reaping and zicade's default `socktimeout` of 20 s.
+        // The watermark is 8: enough for a page opening several requests at
+        // once, small enough to stay near-free when the machine is idle.
+        Self {
+            enabled: true,
+            max_idle: 32,
+            idle_timeout_secs: 20,
+            min_idle: 8,
+            prewarm_interval_ms: 50,
+        }
+    }
 }
 
 /// Where the PAC script comes from.

@@ -89,6 +89,39 @@ pub async fn proxy_connect(proxy: SocketAddr, target: &str) -> TcpStream {
     stream
 }
 
+/// Open a `CONNECT` tunnel through the proxy and return the status code
+/// without asserting it. Used for the failure paths where the proxy is expected
+/// to answer with an error status.
+pub async fn proxy_connect_status(proxy: SocketAddr, target: &str) -> u16 {
+    let mut stream = TcpStream::connect(proxy).await.unwrap();
+    let head = format!(
+        "CONNECT {target} HTTP/1.1
+Host: {target}
+
+"
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    stream.flush().await.unwrap();
+
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 1024];
+    while find(
+        &buf, b"
+
+",
+    )
+    .is_none()
+    {
+        let n = stream.read(&mut tmp).await.unwrap();
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+    }
+    let text = String::from_utf8_lossy(&buf);
+    parse_status(text.lines().next().unwrap_or(""))
+}
+
 async fn read_response(stream: &mut TcpStream) -> HttpResponse {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 8192];

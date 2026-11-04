@@ -120,6 +120,9 @@ impl ConfigForm {
                 },
                 pac: (self.mode == RoutingMode::Pac).then(|| self.pac()),
                 corp_network: if gated { self.corp()? } else { None },
+                // The UI form does not expose pooling yet; keep schema defaults
+                // rather than forcing pool settings onto existing configs.
+                pool: zicade_config::PoolConfig::default(),
             },
             logging: LoggingConfig {
                 level: self.log_level.trim().to_owned(),

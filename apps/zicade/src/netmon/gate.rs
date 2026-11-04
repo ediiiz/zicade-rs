@@ -210,10 +210,7 @@ mod tests {
     /// The sentinel "on-corp" routing the fake `rebuild` returns, distinguishable
     /// from `Direct` by its Debug label ("Upstream").
     fn intended() -> Routing {
-        Routing::Upstream(UpstreamTarget {
-            addr: "wp8080:8080".to_owned(),
-            auth: UpstreamAuth::None,
-        })
+        Routing::Upstream(UpstreamTarget::new("wp8080:8080", UpstreamAuth::None))
     }
 
     fn label(handle: &RoutingHandle) -> String {

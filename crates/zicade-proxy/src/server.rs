@@ -156,19 +156,19 @@ mod tests {
         let handle = RoutingHandle::new(Routing::Direct);
         assert_eq!(format!("{:?}", handle.current()), "Direct");
 
-        handle.set(Routing::Upstream(UpstreamTarget {
-            addr: "127.0.0.1:8080".to_owned(),
-            auth: UpstreamAuth::None,
-        }));
+        handle.set(Routing::Upstream(UpstreamTarget::new(
+            "127.0.0.1:8080".to_owned(),
+            UpstreamAuth::None,
+        )));
         assert_eq!(format!("{:?}", handle.current()), "Upstream");
     }
 
     #[test]
     fn poisoned_routing_handle_keeps_routing_instead_of_going_direct() {
-        let handle = RoutingHandle::new(Routing::Upstream(UpstreamTarget {
-            addr: "127.0.0.1:8080".to_owned(),
-            auth: UpstreamAuth::None,
-        }));
+        let handle = RoutingHandle::new(Routing::Upstream(UpstreamTarget::new(
+            "127.0.0.1:8080".to_owned(),
+            UpstreamAuth::None,
+        )));
         let poisoner = handle.clone();
         let _ = std::thread::spawn(move || {
             let _guard = poisoner.0.lock();
@@ -193,10 +193,10 @@ mod tests {
 
         // Setting through the shared handle is observed by the server's own
         // handle: they point at the same underlying routing.
-        handle.set(Routing::Upstream(UpstreamTarget {
-            addr: "127.0.0.1:8080".to_owned(),
-            auth: UpstreamAuth::None,
-        }));
+        handle.set(Routing::Upstream(UpstreamTarget::new(
+            "127.0.0.1:8080".to_owned(),
+            UpstreamAuth::None,
+        )));
         assert_eq!(format!("{:?}", server.routing.current()), "Upstream");
     }
 }

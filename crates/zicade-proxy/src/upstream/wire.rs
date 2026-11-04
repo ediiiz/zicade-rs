@@ -168,3 +168,33 @@ pub(crate) async fn write_all(stream: &mut TcpStream, bytes: &[u8]) -> io::Resul
     stream.write_all(bytes).await?;
     stream.flush().await
 }
+
+/// Discard any buffered data and confirm the connection is still live.
+///
+/// Used before a socket enters the idle pool: everything the previous request
+/// left unread (the tail of a drained 407 body, a late error page) is thrown
+/// away, so the next handshake cannot start mid-response.
+///
+/// Returns `Ok(())` when the socket is live and empty, and `Err` when the peer
+/// closed it (EOF) or the socket errored — both mean "not reusable". Only
+/// already-pending data is read, so pooling never blocks.
+pub(crate) fn shrink(stream: &mut TcpStream) -> io::Result<()> {
+    let mut buf = [0u8; 8192];
+    loop {
+        match stream.try_read(&mut buf) {
+            // Peer closed (or is closing): the socket is finished.
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "upstream closed the idle socket",
+                ));
+            }
+            // Junk left over from the previous request: drop it and keep going.
+            Ok(_) => continue,
+            // Nothing pending — clean and reusable.
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
