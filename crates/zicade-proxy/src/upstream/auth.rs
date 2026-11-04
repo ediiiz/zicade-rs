@@ -34,11 +34,11 @@ pub(super) enum AuthState {
         credentials: String,
         sent: bool,
     },
-    /// `scheme` is learned from the gateway's first `Proxy-Authenticate` and
-    /// pinned for the rest of this connection's handshake.
+    /// `scheme` is `None` until the connection's first 407, then fixed: the
+    /// keyword a gateway advertises there is the one it expects on every leg.
     Negotiate {
         handshake: NegotiateHandshake<BoxAuth>,
-        scheme: AuthScheme,
+        scheme: Option<AuthScheme>,
     },
 }
 
@@ -52,8 +52,7 @@ impl AuthState {
             },
             UpstreamAuth::Negotiate(factory) => AuthState::Negotiate {
                 handshake: NegotiateHandshake::new(BoxAuth(factory())),
-                // Overridden by the first 407 that names a scheme.
-                scheme: AuthScheme::default(),
+                scheme: None,
             },
         }
     }
@@ -89,33 +88,108 @@ impl AuthState {
                     Ok(credentials.clone())
                 }
             }
-            AuthState::Negotiate { handshake, scheme } => {
-                let offer = negotiate_offer(headers);
-                // Pin the keyword the gateway asked for; it may advertise the
-                // same SSPI handshake as `NTLM` instead of `Negotiate`.
-                if let Some(advertised) = offer.scheme() {
-                    *scheme = advertised;
-                }
-                let pinned = *scheme;
-                let token = advance_handshake(handshake, offer.challenge())?;
-                Ok(build_proxy_authorization(pinned, &token))
-            }
+            AuthState::Negotiate { handshake, scheme } => negotiate_leg(handshake, scheme, headers),
         }
     }
 }
 
-/// The first `Proxy-Authenticate` entry that offers Negotiate or NTLM.
+/// Answer one 407 of a Negotiate/NTLM handshake. The first leg learns the
+/// keyword; later legs keep it even if the gateway names the other one, since
+/// switching keywords mid-handshake makes the gateway restart or reject it.
+fn negotiate_leg(
+    handshake: &mut NegotiateHandshake<BoxAuth>,
+    scheme: &mut Option<AuthScheme>,
+    headers: &[(String, String)],
+) -> io::Result<String> {
+    let offer = negotiate_offer(headers);
+    let first_leg = scheme.is_none();
+    let keyword = match *scheme {
+        Some(learned) => learned,
+        None => first_leg_scheme(headers, &offer)?,
+    };
+    *scheme = Some(keyword);
+    let token = advance_handshake(handshake, offer.challenge())?;
+    if first_leg && spnego_under_ntlm(keyword, &token) {
+        tracing::warn!(
+            "upstream advertises NTLM proxy auth but the SSPI package produced a \
+             SPNEGO token, which NTLM-only gateways reject; set the upstream auth \
+             package to \"ntlm\""
+        );
+    }
+    Ok(build_proxy_authorization(keyword, &token))
+}
+
+/// The keyword to answer a connection's first 407 with.
 ///
-/// A single 407 can carry several headers (e.g. `NTLM` and `Basic`); only the
-/// scheme we can answer is considered, and a later header must not mask an
-/// earlier one.
+/// A 407 that offers schemes, none of them Negotiate or NTLM, cannot be
+/// answered: sending a token anyway lets a gateway that ignores it stall the
+/// handshake until the timeout, so fail now and name what it did offer. A 407
+/// with no `Proxy-Authenticate` at all rules nothing out, so it gets the
+/// RFC 4559 `Negotiate` keyword the configured auth mode implies.
+fn first_leg_scheme(
+    headers: &[(String, String)],
+    offer: &NegotiateOffer,
+) -> io::Result<AuthScheme> {
+    if let Some(advertised) = offer.scheme() {
+        return Ok(advertised);
+    }
+    let offered: Vec<&str> = challenges(headers).map(scheme_name).collect();
+    if offered.is_empty() {
+        return Ok(AuthScheme::Negotiate);
+    }
+    Err(io::Error::other(format!(
+        "upstream offers no Negotiate/NTLM proxy auth (offered: {})",
+        offered.join(", ")
+    )))
+}
+
+/// The first challenge that offers Negotiate or NTLM, across every
+/// `Proxy-Authenticate` header: a 407 may list `Basic` before `NTLM`, in
+/// separate headers or one comma-separated value, and the scheme we can answer
+/// must not be masked by one we cannot.
 fn negotiate_offer(headers: &[(String, String)]) -> NegotiateOffer {
+    challenges(headers)
+        .map(parse_proxy_authenticate)
+        .find(|offer| !matches!(offer, NegotiateOffer::NotOffered))
+        .unwrap_or(NegotiateOffer::NotOffered)
+}
+
+/// Each challenge (`<scheme> [token68 | auth-params]`) in the
+/// `Proxy-Authenticate` headers. A value may hold several challenges separated
+/// by commas, which also separate a challenge's auth-params; a comma-separated
+/// piece starts a new challenge only when its first word is a bare token
+/// rather than a `name=value` param.
+fn challenges(headers: &[(String, String)]) -> impl Iterator<Item = &str> {
     headers
         .iter()
         .filter(|(k, _)| k == "proxy-authenticate")
-        .map(|(_, v)| parse_proxy_authenticate(v))
-        .find(|offer| !matches!(offer, NegotiateOffer::NotOffered))
-        .unwrap_or(NegotiateOffer::NotOffered)
+        .flat_map(|(_, v)| v.split(','))
+        .map(str::trim)
+        .filter(|piece| {
+            let name = scheme_name(piece);
+            !name.is_empty() && name.bytes().all(is_tchar)
+        })
+}
+
+fn scheme_name(challenge: &str) -> &str {
+    challenge.split_whitespace().next().unwrap_or_default()
+}
+
+/// RFC 9110 `tchar`: the characters an auth-scheme name may contain.
+fn is_tchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
+}
+
+/// Every raw NTLM message starts with this; SPNEGO tokens are ASN.1 instead.
+const NTLMSSP_SIGNATURE: &[u8] = b"NTLMSSP\0";
+
+/// Whether we are about to send a SPNEGO token under the `NTLM` keyword. A
+/// gateway advertising `NTLM` expects raw NTLM messages, but the `Negotiate`
+/// SSPI package wraps them in SPNEGO. The package is chosen in the app's
+/// config, so the token itself is inspected rather than threading the package
+/// through every layer.
+fn spnego_under_ntlm(scheme: AuthScheme, token: &[u8]) -> bool {
+    scheme == AuthScheme::Ntlm && !token.starts_with(NTLMSSP_SIGNATURE)
 }
 
 fn auth_io_err(err: AuthError) -> io::Error {
@@ -140,3 +214,6 @@ fn advance_handshake(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests;
