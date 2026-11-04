@@ -276,7 +276,7 @@ pub async fn spawn_scripted_upstream(
     (addr, head_rx)
 }
 
-async fn echo_tunnel(mut stream: TcpStream) {
+pub async fn echo_tunnel(mut stream: TcpStream) {
     let mut buf = [0u8; 8192];
     loop {
         match stream.read(&mut buf).await {
@@ -291,7 +291,7 @@ async fn echo_tunnel(mut stream: TcpStream) {
 }
 
 /// Read one request head (to `\r\n\r\n`) plus any `Content-Length` body.
-async fn read_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
+pub async fn read_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
     let head_end = loop {

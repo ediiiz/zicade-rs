@@ -4,6 +4,7 @@
 
 pub mod client;
 pub mod origin;
+pub mod scheme_fake;
 pub mod upstream_fake;
 
 use std::net::SocketAddr;
