@@ -4,7 +4,9 @@
 
 use std::io;
 
-use zicade_auth::header::{NegotiateOffer, build_proxy_authorization, parse_proxy_authenticate};
+use zicade_auth::header::{
+    AuthScheme, NegotiateOffer, build_proxy_authorization, parse_proxy_authenticate,
+};
 use zicade_auth::{
     AuthError, HandshakeStep, NegotiateHandshake, UpstreamAuthenticator, UpstreamResponse,
 };
@@ -24,12 +26,17 @@ impl UpstreamAuthenticator for BoxAuth {
 
 /// Per-connection auth driver: chooses the `Proxy-Authorization` scheme and
 /// produces each leg's header value. This is where the scheme is selected by
-/// auth type — Negotiate builds `Negotiate <token>`, Basic sends its ready-made
-/// `Basic <b64>` value.
+/// auth type — Negotiate/NTLM builds `<scheme> <token>`, Basic sends its
+/// ready-made `Basic <b64>` value.
 pub(super) enum AuthState {
     None,
     Basic { credentials: String, sent: bool },
-    Negotiate(NegotiateHandshake<BoxAuth>),
+    /// `scheme` is learned from the gateway's first `Proxy-Authenticate` and
+    /// pinned for the rest of this connection's handshake.
+    Negotiate {
+        handshake: NegotiateHandshake<BoxAuth>,
+        scheme: AuthScheme,
+    },
 }
 
 impl AuthState {
@@ -40,9 +47,11 @@ impl AuthState {
                 credentials: credentials.clone(),
                 sent: false,
             },
-            UpstreamAuth::Negotiate(factory) => {
-                AuthState::Negotiate(NegotiateHandshake::new(BoxAuth(factory())))
-            }
+            UpstreamAuth::Negotiate(factory) => AuthState::Negotiate {
+                handshake: NegotiateHandshake::new(BoxAuth(factory())),
+                // Overridden by the first 407 that names a scheme.
+                scheme: AuthScheme::default(),
+            },
         }
     }
 
@@ -54,7 +63,7 @@ impl AuthState {
                 *sent = true;
                 Some(credentials.clone())
             }
-            AuthState::None | AuthState::Negotiate(_) => None,
+            AuthState::None | AuthState::Negotiate { .. } => None,
         }
     }
 
@@ -77,24 +86,33 @@ impl AuthState {
                     Ok(credentials.clone())
                 }
             }
-            AuthState::Negotiate(handshake) => {
-                let token = advance_handshake(handshake, headers)?;
-                Ok(build_proxy_authorization(&token))
+            AuthState::Negotiate { handshake, scheme } => {
+                let offer = negotiate_offer(headers);
+                // Pin the keyword the gateway asked for; it may advertise the
+                // same SSPI handshake as `NTLM` instead of `Negotiate`.
+                if let Some(advertised) = offer.scheme() {
+                    *scheme = advertised;
+                }
+                let pinned = *scheme;
+                let token = advance_handshake(handshake, offer.challenge())?;
+                Ok(build_proxy_authorization(pinned, &token))
             }
         }
     }
 }
 
-/// The decoded Negotiate challenge from a `Proxy-Authenticate` header, if any.
-fn negotiate_challenge(headers: &[(String, String)]) -> Option<Vec<u8>> {
-    let value = headers
+/// The first `Proxy-Authenticate` entry that offers Negotiate or NTLM.
+///
+/// A single 407 can carry several headers (e.g. `NTLM` and `Basic`); only the
+/// scheme we can answer is considered, and a later header must not mask an
+/// earlier one.
+fn negotiate_offer(headers: &[(String, String)]) -> NegotiateOffer {
+    headers
         .iter()
-        .find(|(k, _)| k == "proxy-authenticate")
-        .map(|(_, v)| v.as_str())?;
-    match parse_proxy_authenticate(value) {
-        NegotiateOffer::Challenge(bytes) => Some(bytes),
-        NegotiateOffer::Offered | NegotiateOffer::NotOffered => None,
-    }
+        .filter(|(k, _)| k == "proxy-authenticate")
+        .map(|(_, v)| parse_proxy_authenticate(v))
+        .find(|offer| !matches!(offer, NegotiateOffer::NotOffered))
+        .unwrap_or(NegotiateOffer::NotOffered)
 }
 
 fn auth_io_err(err: AuthError) -> io::Error {
@@ -102,14 +120,15 @@ fn auth_io_err(err: AuthError) -> io::Error {
 }
 
 /// Drive one 407 leg: feed the challenge to the handshake and return the next
-/// Negotiate token, or an error if the handshake has no more work.
+/// SSPI token, or an error if the handshake has no more work.
 fn advance_handshake(
     handshake: &mut NegotiateHandshake<BoxAuth>,
-    headers: &[(String, String)],
+    challenge: Option<&[u8]>,
 ) -> io::Result<Vec<u8>> {
-    let challenge = negotiate_challenge(headers);
     match handshake
-        .on_response(UpstreamResponse::ProxyAuthRequired { challenge })
+        .on_response(UpstreamResponse::ProxyAuthRequired {
+            challenge: challenge.map(<[u8]>::to_vec),
+        })
         .map_err(auth_io_err)?
     {
         HandshakeStep::SendToken(token) => Ok(token),

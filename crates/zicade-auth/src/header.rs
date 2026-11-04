@@ -1,40 +1,94 @@
-//! Negotiate proxy-auth header parsing and building.
+//! Proxy-auth header parsing and building for the Negotiate/NTLM schemes.
+//!
+//! Many corporate gateways advertise the SPNEGO-capable NTLM scheme simply as
+//! `Proxy-Authenticate: NTLM` rather than `Negotiate`, and accept only
+//! `Proxy-Authorization: NTLM <token>` in return. Both spellings carry the same
+//! SSPI tokens, so the scheme is tracked across the handshake instead of being
+//! hard-coded.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
-/// What a `Proxy-Authenticate` header offers for the Negotiate scheme.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NegotiateOffer {
-    /// The header does not offer Negotiate.
-    NotOffered,
-    /// Negotiate is offered with no token (the initial challenge).
-    Offered,
-    /// Negotiate is offered with a decoded continuation token.
-    Challenge(Vec<u8>),
+/// Which proxy-auth scheme the upstream gateway is speaking.
+///
+/// Only the keyword written into the `Proxy-Authorization` header differs; the
+/// SSPI tokens are identical for both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthScheme {
+    /// `Proxy-Authenticate: Negotiate` (RFC 4559 spelling).
+    #[default]
+    Negotiate,
+    /// `Proxy-Authenticate: NTLM` (common on security-gateway appliances).
+    Ntlm,
 }
 
-/// Parse a single `Proxy-Authenticate` header value for a Negotiate offer.
+impl AuthScheme {
+    /// The keyword used in the `Proxy-Authorization` header.
+    #[must_use]
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Negotiate => "Negotiate",
+            Self::Ntlm => "NTLM",
+        }
+    }
+}
+
+/// What a `Proxy-Authenticate` header offers for the Negotiate/NTLM schemes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NegotiateOffer {
+    /// The header does not offer either scheme.
+    NotOffered,
+    /// A scheme is offered with no token (the initial challenge).
+    Offered(AuthScheme),
+    /// A scheme is offered with a decoded continuation token.
+    Challenge(AuthScheme, Vec<u8>),
+}
+
+impl NegotiateOffer {
+    /// The scheme this offer belongs to, if any.
+    #[must_use]
+    pub fn scheme(&self) -> Option<AuthScheme> {
+        match self {
+            Self::NotOffered => None,
+            Self::Offered(s) | Self::Challenge(s, _) => Some(*s),
+        }
+    }
+
+    /// The continuation token, when the offer carries one.
+    #[must_use]
+    pub fn challenge(&self) -> Option<&[u8]> {
+        match self {
+            Self::Challenge(_, bytes) => Some(bytes),
+            Self::Offered(_) | Self::NotOffered => None,
+        }
+    }
+}
+
+/// Parse a single `Proxy-Authenticate` header value for a Negotiate/NTLM offer.
 pub fn parse_proxy_authenticate(value: &str) -> NegotiateOffer {
     let value = value.trim();
     let mut parts = value.splitn(2, char::is_whitespace);
     let scheme = parts.next().unwrap_or_default();
-    if !scheme.eq_ignore_ascii_case("negotiate") {
+    let scheme = if scheme.eq_ignore_ascii_case("negotiate") {
+        AuthScheme::Negotiate
+    } else if scheme.eq_ignore_ascii_case("ntlm") {
+        AuthScheme::Ntlm
+    } else {
         return NegotiateOffer::NotOffered;
-    }
+    };
     match parts.next().map(str::trim).filter(|s| !s.is_empty()) {
-        None => NegotiateOffer::Offered,
+        None => NegotiateOffer::Offered(scheme),
         Some(token) => match STANDARD.decode(token) {
-            Ok(bytes) => NegotiateOffer::Challenge(bytes),
+            Ok(bytes) => NegotiateOffer::Challenge(scheme, bytes),
             // A malformed token is treated as a bare offer rather than fatal.
-            Err(_) => NegotiateOffer::Offered,
+            Err(_) => NegotiateOffer::Offered(scheme),
         },
     }
 }
 
-/// Build a `Proxy-Authorization` header value carrying a Negotiate token.
-pub fn build_proxy_authorization(token: &[u8]) -> String {
-    format!("Negotiate {}", STANDARD.encode(token))
+/// Build a `Proxy-Authorization` header value carrying a token for `scheme`.
+pub fn build_proxy_authorization(scheme: AuthScheme, token: &[u8]) -> String {
+    format!("{} {}", scheme.keyword(), STANDARD.encode(token))
 }
 
 /// Build a `Proxy-Authorization` header value carrying HTTP Basic credentials
