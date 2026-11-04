@@ -192,6 +192,11 @@ Closing the window keeps the proxy running in the tray.
       "enabled": true,
       "dnsSuffixes": ["droot.org"],    // required when enabled; matched dot-boundary, case-insensitive
       "pollSeconds": 30                // re-check fallback interval (default 30)
+    },
+    "pool": {                          // optional; prewarmed upstream sockets for CONNECT
+      "enabled": false,                // off by default
+      "minIdle": 2,                    // idle sockets kept per upstream (1-16)
+      "idleTimeoutSeconds": 30         // an idle socket is replaced after this long
     }
   },
   "logging": { "level": "info", "format": "json" }
@@ -201,7 +206,9 @@ Closing the window keeps the proxy running in the tray.
 Validation runs at startup and **fails fast** with a clear message: ports must
 be non-zero, `upstream`/`pac` sections are required for their modes, `basic` auth
 requires a username, `negotiate` auth is only accepted on Windows, and an enabled
-`corpNetwork` requires a non-empty `dnsSuffixes` and a non-zero `pollSeconds`.
+`corpNetwork` requires a non-empty `dnsSuffixes` and a non-zero `pollSeconds`;
+an enabled `pool` requires `minIdle` between 1 and 16 and a non-zero
+`idleTimeoutSeconds`.
 
 #### Corporate-network detection (`routing.corpNetwork`)
 
@@ -225,6 +232,21 @@ or if adapter enumeration fails, detection is unavailable and the configured
 routing applies unchanged (the feature is purely additive). Enabling the gate
 from the UI when it was off at startup requires a restart; changing suffixes or
 toggling it while it is already running takes effect immediately.
+
+#### Prewarmed upstream sockets (`routing.pool`)
+
+Optional and **disabled by default**. When enabled, each upstream proxy a
+`CONNECT` goes to (the fixed upstream, or each proxy a PAC script picks, up to
+eight) gets up to `minIdle` idle TCP connections kept open, so the next
+`CONNECT` skips the TCP dial. Only the dial is saved: a pooled socket has never
+carried a request, every `CONNECT` runs its own full 407 handshake on it, and a
+socket that has carried a request is never pooled. A pooled socket the gateway
+closed while it waited is replaced by one fresh dial; an HTTP refusal or a
+rejected credential is never retried. Prewarming starts with the first
+`CONNECT` to an upstream, backs off when the gateway cannot be reached, and stops
+when the routing changes (a config apply, a network change, going direct).
+Plain HTTP requests are unaffected. It is off by default because it holds
+connections open to the gateway while the machine is idle.
 
 ## The window
 
@@ -327,7 +349,8 @@ maps "no config" to DIRECT, so it logs the real decision rather than failing.
   the handshake cost, but is **deliberately deferred** — it adds per-connection
   stream state, mid-reuse reconnect/re-auth, and keep-alive framing complexity
   with real risk to the handle-stability guarantee, for a latency win that does
-  not justify it. `CONNECT` tunnels are inherently per-connection and unaffected.
+  not justify it. `CONNECT` tunnels are inherently per-connection; the opt-in
+  `routing.pool` only prewarms their TCP dial, never an authenticated connection.
 - **`negotiate` is Windows-only.** Off-Windows, config validation rejects it; if
   a Negotiate authenticator is somehow constructed off-target, it errors at
   handshake time rather than at startup.
