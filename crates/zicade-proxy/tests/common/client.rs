@@ -69,6 +69,14 @@ pub async fn proxy_http(
 /// Open a `CONNECT` tunnel through the proxy, asserting a 200 reply, and return
 /// the (now spliced) stream for raw byte exchange with the target.
 pub async fn proxy_connect(proxy: SocketAddr, target: &str) -> TcpStream {
+    let (status, stream) = proxy_connect_status(proxy, target).await;
+    assert_eq!(status, 200, "CONNECT should return 200, got {status}");
+    stream
+}
+
+/// Send `CONNECT target` through the proxy and return the reply's status with
+/// the stream, for tests that expect the proxy to refuse.
+pub async fn proxy_connect_status(proxy: SocketAddr, target: &str) -> (u16, TcpStream) {
     let mut stream = TcpStream::connect(proxy).await.unwrap();
     let head = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n");
     stream.write_all(head.as_bytes()).await.unwrap();
@@ -84,9 +92,7 @@ pub async fn proxy_connect(proxy: SocketAddr, target: &str) -> TcpStream {
         buf.extend_from_slice(&tmp[..n]);
     }
     let text = String::from_utf8_lossy(&buf);
-    let status = parse_status(text.lines().next().unwrap_or(""));
-    assert_eq!(status, 200, "CONNECT should return 200, got:\n{text}");
-    stream
+    (parse_status(text.lines().next().unwrap_or("")), stream)
 }
 
 async fn read_response(stream: &mut TcpStream) -> HttpResponse {

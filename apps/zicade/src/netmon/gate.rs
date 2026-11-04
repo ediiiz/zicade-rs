@@ -213,6 +213,7 @@ mod tests {
         Routing::Upstream(UpstreamTarget {
             addr: "wp8080:8080".to_owned(),
             auth: UpstreamAuth::None,
+            pool: None,
         })
     }
 

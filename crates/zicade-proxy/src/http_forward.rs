@@ -210,7 +210,7 @@ async fn handle_connect_upstream(
         "connect request received"
     );
     let dial_start = Instant::now();
-    let peer = match upstream::connect_via_upstream(&target.addr, &dst, &target.auth).await {
+    let peer = match upstream::connect_via_upstream(target, &dst).await {
         Ok(peer) => peer,
         Err(err) => {
             tracing::warn!(error = %err, dst, upstream = %target.addr, "upstream CONNECT failed");

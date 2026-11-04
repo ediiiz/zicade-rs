@@ -6,12 +6,13 @@
 //! [`crate::pac_router`], which injects a `PacRouter` closure backed by WinHTTP.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use zicade_auth::header::build_basic_authorization;
 use zicade_auth::{AuthError, UpstreamAuthenticator};
 use zicade_config::{AuthConfig, AuthMode, Config, RoutingMode};
-use zicade_proxy::{AuthFactory, Routing, UpstreamAuth, UpstreamTarget};
+use zicade_proxy::{AuthFactory, PoolConfig, Routing, UpstreamAuth, UpstreamPool, UpstreamTarget};
 use zicade_win::SspiNegotiate;
 
 /// Build the proxy [`Routing`] for the given config.
@@ -31,8 +32,24 @@ fn build_upstream(config: &Config) -> anyhow::Result<Routing> {
         .context("routing.mode = upstream requires a [routing.upstream] section")?;
     let addr = format!("{}:{}", up.host, up.port);
     let auth = build_auth(&up.auth, &up.host);
-    tracing::info!(upstream = %addr, auth = ?up.auth.mode, "routing via upstream proxy");
-    Ok(Routing::Upstream(UpstreamTarget { addr, auth }))
+    let pool = pool_config(&config.routing.pool).map(|pool| UpstreamPool::new(&addr, pool));
+    tracing::info!(
+        upstream = %addr,
+        auth = ?up.auth.mode,
+        prewarm = pool.is_some(),
+        "routing via upstream proxy"
+    );
+    Ok(Routing::Upstream(UpstreamTarget { addr, auth, pool }))
+}
+
+/// The proxy's pool settings for `routing.pool`, or `None` while it is off.
+/// Pools built from them live in the routing snapshot, so a rebuild (config
+/// apply, network change, going direct) drops the old ones with it.
+pub(crate) fn pool_config(pool: &zicade_config::PoolConfig) -> Option<PoolConfig> {
+    pool.enabled.then(|| PoolConfig {
+        min_idle: pool.min_idle,
+        idle_timeout: Duration::from_secs(pool.idle_timeout_seconds),
+    })
 }
 
 /// Map an [`AuthConfig`] onto the proxy's [`UpstreamAuth`]. `host` is the proxy
@@ -96,9 +113,40 @@ impl UpstreamAuthenticator for DeferredSspi {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_auth, map_package};
-    use zicade_config::{AuthConfig, AuthMode, SspiPackage as CfgPkg};
+    use super::{build_auth, build_routing, map_package};
+    use zicade_config::{AuthConfig, AuthMode, Config, RoutingMode, SspiPackage as CfgPkg};
+    use zicade_config::{PoolConfig, UpstreamConfig};
+    use zicade_proxy::Routing;
     use zicade_win::SspiPackage as WinPkg;
+
+    fn upstream_config(pool: PoolConfig) -> Config {
+        let mut config = Config::default();
+        config.routing.mode = RoutingMode::Upstream;
+        config.routing.upstream = Some(UpstreamConfig {
+            host: "proxy.example.com".to_owned(),
+            port: 8080,
+            auth: AuthConfig::default(),
+        });
+        config.routing.pool = pool;
+        config
+    }
+
+    fn has_pool(config: &Config) -> bool {
+        match build_routing(config).expect("upstream routing builds") {
+            Routing::Upstream(target) => target.pool.is_some(),
+            other => panic!("expected Upstream, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn upstream_routing_prewarms_only_when_the_pool_is_enabled() {
+        assert!(!has_pool(&upstream_config(PoolConfig::default())));
+        let enabled = PoolConfig {
+            enabled: true,
+            ..PoolConfig::default()
+        };
+        assert!(has_pool(&upstream_config(enabled)));
+    }
 
     #[test]
     fn maps_config_package_onto_win_package() {

@@ -19,11 +19,11 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use tokio::sync::{mpsc, oneshot};
 use zicade_config::{Config, FailPolicy, PacSource, RoutingConfig};
-use zicade_proxy::{PacRouter, RouteChoice, Routing, UpstreamTarget};
+use zicade_proxy::{PacRouter, RouteChoice, Routing, UpstreamPools, UpstreamTarget};
 use zicade_routing::{PacBackend, PacResult, RoutingError};
 use zicade_win::WinHttpPacBackend;
 
-use crate::routing::build_auth;
+use crate::routing::{build_auth, pool_config};
 
 /// A resolve request: the target URL plus a one-shot channel for the result.
 type ResolveJob = (String, oneshot::Sender<Result<PacResult, RoutingError>>);
@@ -61,10 +61,14 @@ pub(crate) fn build_pac(config: &Config) -> anyhow::Result<Routing> {
         .context("start the PAC resolver thread")?;
     let routing = Arc::new(config.routing.clone());
     let cache = Arc::new(PacCache::new(CACHE_TTL));
+    // Owned by the router closure, so the pools and their prewarm tasks are
+    // dropped with this routing snapshot.
+    let pools = pool_config(&config.routing.pool).map(|pool| Arc::new(UpstreamPools::new(pool)));
     let router: PacRouter = Arc::new(move |url: String| {
         let tx = tx.clone();
         let routing = Arc::clone(&routing);
         let cache = Arc::clone(&cache);
+        let pools = pools.clone();
         Box::pin(async move {
             let resolved = match cache.get(&url) {
                 Some(decision) => Ok(decision),
@@ -76,7 +80,7 @@ pub(crate) fn build_pac(config: &Config) -> anyhow::Result<Routing> {
                     resolved
                 }
             };
-            to_route_choice(resolved, &routing)
+            to_route_choice(resolved, &routing).map(|choice| with_pool(choice, pools.as_deref()))
         })
     });
     Ok(Routing::Pac(router))
@@ -221,6 +225,7 @@ fn to_route_choice(
             Ok(RouteChoice::Upstream(UpstreamTarget {
                 addr: format!("{host}:{port}"),
                 auth,
+                pool: None,
             }))
         }
         Err(err) => match routing
@@ -238,13 +243,25 @@ fn to_route_choice(
     }
 }
 
+/// Give a PAC-selected upstream the snapshot's pool for its `host:port`.
+fn with_pool(choice: RouteChoice, pools: Option<&UpstreamPools>) -> RouteChoice {
+    match (choice, pools) {
+        (RouteChoice::Upstream(mut target), Some(pools)) => {
+            target.pool = pools.get(&target.addr);
+            RouteChoice::Upstream(target)
+        }
+        (choice, _) => choice,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::Duration;
 
-    use super::{PacCache, to_route_choice};
+    use super::{PacCache, to_route_choice, with_pool};
     use zicade_config::{AuthMode, FailPolicy, PacConfig, RoutingConfig, RoutingMode};
-    use zicade_proxy::RouteChoice;
+    use zicade_proxy::{RouteChoice, UpstreamPool, UpstreamPools};
     use zicade_routing::{PacResult, RoutingError};
 
     #[test]
@@ -317,5 +334,39 @@ mod tests {
         let routing = routing_pac(FailPolicy::Error);
         let result = to_route_choice(Err(RoutingError::Backend("no PAC".to_owned())), &routing);
         assert!(result.is_err(), "FailPolicy::Error must surface an error");
+    }
+
+    fn pooled_pick(host: &str, pools: Option<&UpstreamPools>) -> Option<Arc<UpstreamPool>> {
+        let routing = routing_pac(FailPolicy::Error);
+        let resolved = Ok(PacResult::Proxy {
+            host: host.to_owned(),
+            port: 8080,
+        });
+        match with_pool(to_route_choice(resolved, &routing).unwrap(), pools) {
+            RouteChoice::Upstream(target) => target.pool,
+            RouteChoice::Direct => panic!("expected Upstream, got Direct"),
+        }
+    }
+
+    #[test]
+    fn pac_upstreams_share_one_pool_per_proxy_address() {
+        let pools = UpstreamPools::new(zicade_proxy::PoolConfig {
+            min_idle: 2,
+            idle_timeout: Duration::from_secs(30),
+        });
+        let first = pooled_pick("proxy.example.com", Some(&pools)).expect("pooled");
+        let again = pooled_pick("proxy.example.com", Some(&pools)).expect("pooled");
+        let other = pooled_pick("other.example.com", Some(&pools)).expect("pooled");
+        assert!(Arc::ptr_eq(&first, &again), "one pool per upstream");
+        assert!(
+            !Arc::ptr_eq(&first, &other),
+            "upstreams never share sockets"
+        );
+        assert_eq!(first.addr(), "proxy.example.com:8080");
+    }
+
+    #[test]
+    fn pac_upstreams_dial_per_request_while_the_pool_is_off() {
+        assert!(pooled_pick("proxy.example.com", None).is_none());
     }
 }

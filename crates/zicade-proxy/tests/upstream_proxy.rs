@@ -13,6 +13,7 @@ use common::upstream_fake::{
 };
 use common::{TestProxy, wait_for_active_zero};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use zicade_auth::header::build_basic_authorization;
 use zicade_proxy::{Routing, UpstreamAuth, UpstreamTarget};
 
 #[tokio::test]
@@ -21,6 +22,7 @@ async fn connect_through_upstream_negotiate_tunnels() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: negotiate_factory(),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -42,6 +44,7 @@ async fn http_forward_through_upstream_negotiate_echoes_body() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: negotiate_factory(),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -73,6 +76,7 @@ async fn connect_through_upstream_basic_tunnels() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: basic_auth(GOOD_BASIC),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -92,6 +96,7 @@ async fn http_forward_through_upstream_basic_echoes_body() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: basic_auth(GOOD_BASIC),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -121,7 +126,8 @@ async fn http_forward_through_upstream_basic_wrong_credentials_fails_cleanly() {
     let upstream = spawn_basic_upstream(GOOD_BASIC).await;
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
-        auth: basic_auth("Basic d3Jvbmc6Y3JlZHM="),
+        auth: basic_auth(&build_basic_authorization("wrong", "creds")),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -151,7 +157,8 @@ async fn connect_through_upstream_basic_wrong_credentials_fails_cleanly() {
     let upstream = spawn_basic_upstream(GOOD_BASIC).await;
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
-        auth: basic_auth("Basic d3Jvbmc6Y3JlZHM="),
+        auth: basic_auth(&build_basic_authorization("wrong", "creds")),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -193,6 +200,7 @@ async fn connect_through_upstream_no_auth() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: UpstreamAuth::None,
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -224,6 +232,7 @@ async fn sequential_forward_requests_each_authenticate_independently() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: negotiate_factory(),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -255,6 +264,7 @@ async fn forward_through_looping_upstream_hits_leg_cap_without_hanging() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: infinite_negotiate_factory(),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -288,6 +298,7 @@ async fn sequential_connect_tunnels_each_authenticate_independently() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: negotiate_factory(),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
@@ -314,6 +325,7 @@ async fn forward_burst_drains_connections_and_holds_handle_count() {
     let routing = Routing::Upstream(UpstreamTarget {
         addr: upstream.to_string(),
         auth: negotiate_factory(),
+        pool: None,
     });
     let proxy = TestProxy::spawn_with_routing(routing).await;
 
