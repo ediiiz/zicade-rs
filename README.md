@@ -182,7 +182,7 @@ Closing the window keeps the proxy running in the tray.
   "routing": {
     "mode": "direct",                 // "direct" | "upstream" | "pac"
     "upstream": {                      // required when mode = "upstream"
-      "host": "wp8080", "port": 8080,
+      "host": "proxy.example.com", "port": 8080,
       "auth": {
         "mode": "negotiate",           // "none" | "basic" | "negotiate"
         "package": "ntlm",             // negotiate only: "ntlm" (default) | "negotiate"
@@ -197,7 +197,7 @@ Closing the window keeps the proxy running in the tray.
     },
     "corpNetwork": {                   // optional; gates pac/upstream on the corp network
       "enabled": true,
-      "dnsSuffixes": ["droot.org"],    // required when enabled; matched dot-boundary, case-insensitive
+      "dnsSuffixes": ["ad.example.org"], // required when enabled; matched dot-boundary, case-insensitive
       "pollSeconds": 30                // re-check fallback interval (default 30)
     }
   },
@@ -216,7 +216,7 @@ Optional and **disabled by default** (absent = off; older configs are
 unaffected). When enabled with `mode = "pac"` or `"upstream"`, a background
 monitor decides whether the machine is on the corporate network by matching the
 active adapters' connection-specific DNS suffixes against `dnsSuffixes`
-(case-insensitive, on a dot boundary — `dy.droot.org` matches `droot.org`):
+(case-insensitive, on a dot boundary — `site.ad.example.org` matches `ad.example.org`):
 
 - **On the corporate network** → the configured routing (PAC/upstream) applies.
 - **Off it** → the proxy routes **direct**, so it keeps working when you
@@ -291,14 +291,14 @@ ports, fake origins/backends.
 
 The live tests are gated behind an env var and are intended for the
 domain-joined Windows machine, on the corporate network, pointing at the real
-`wp8080` upstream + PAC:
+upstream + PAC (`ZICADE_LIVE_UPSTREAM` names it and is required):
 
 ```sh
-ZICADE_LIVE_PROXY=1 cargo test
+ZICADE_LIVE_PROXY=1 ZICADE_LIVE_UPSTREAM=proxy.example.com:8080 cargo test
 ```
 
 Run these only on-corp; off-target they are skipped. Verified green against the
-real Skyhigh/McAfee Secure Web Gateway at `wp8080:8080`: the multi-leg
+real corporate secure web gateway: the multi-leg
 `407 -> NTLM -> 200` handshake, HTTPS via `CONNECT` through the gateway,
 plain-HTTP forwarding, and a soak that holds a flat OS-handle count (no leak).
 
@@ -339,7 +339,7 @@ maps "no config" to DIRECT, so it logs the real decision rather than failing.
   a Negotiate authenticator is somehow constructed off-target, it errors at
   handshake time rather than at startup.
 - **`negotiate` defaults to the NTLM SSPI package, not SPNEGO/Kerberos.** The
-  target corporate gateway (Skyhigh/McAfee) offers `Negotiate`/`NTLM`/`Basic` but
+  target corporate secure web gateway offers `Negotiate`/`NTLM`/`Basic` but
   does not accept SPNEGO, and has no Kerberos SPN for the proxy appliance. The
   SSPI `Negotiate` package's raw-NTLM fallback also cannot complete against it
   (`SEC_E_INVALID_TOKEN` on the challenge leg). So the SSPI package defaults to

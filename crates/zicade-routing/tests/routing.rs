@@ -15,9 +15,9 @@ fn parse_direct() {
 #[test]
 fn parse_proxy() {
     assert_eq!(
-        PacResult::parse("PROXY wp8080:8080"),
+        PacResult::parse("PROXY proxy.example.com:8080"),
         PacResult::Proxy {
-            host: "wp8080".to_owned(),
+            host: "proxy.example.com".to_owned(),
             port: 8080
         }
     );
@@ -26,9 +26,9 @@ fn parse_proxy() {
 #[test]
 fn parse_proxy_then_direct_takes_first_proxy() {
     assert_eq!(
-        PacResult::parse("PROXY wp8080:8080; DIRECT"),
+        PacResult::parse("PROXY proxy.example.com:8080; DIRECT"),
         PacResult::Proxy {
-            host: "wp8080".to_owned(),
+            host: "proxy.example.com".to_owned(),
             port: 8080
         }
     );
@@ -48,9 +48,9 @@ fn parse_whitespace_is_direct() {
 fn parse_socks_is_skipped_to_next_proxy() {
     // SOCKS entries are ignored; the first usable PROXY wins.
     assert_eq!(
-        PacResult::parse("SOCKS sock5:1080; PROXY wp8080:8080"),
+        PacResult::parse("SOCKS sock5:1080; PROXY proxy.example.com:8080"),
         PacResult::Proxy {
-            host: "wp8080".to_owned(),
+            host: "proxy.example.com".to_owned(),
             port: 8080
         }
     );
@@ -60,9 +60,9 @@ fn parse_socks_is_skipped_to_next_proxy() {
 fn parse_bare_winhttp_proxy_list() {
     // WinHttpGetProxyForUrl returns a bare host:port list (no PROXY keyword).
     assert_eq!(
-        PacResult::parse("wp8080:8080"),
+        PacResult::parse("proxy.example.com:8080"),
         PacResult::Proxy {
-            host: "wp8080".to_owned(),
+            host: "proxy.example.com".to_owned(),
             port: 8080
         }
     );
@@ -80,7 +80,7 @@ fn pac_negotiate() -> PacConfig {
 fn external_host_routes_to_upstream_with_pac_auth() {
     // LESSON-6: a PAC-selected upstream inherits routing.pac.auth so the
     // downstream Negotiate handshake can run.
-    let backend = FakeBackend::classify("wp8080", 8080);
+    let backend = FakeBackend::classify("proxy.example.com", 8080);
     let resolver = RouteResolver::new(pac_negotiate(), backend);
 
     let decision = resolver
@@ -89,7 +89,7 @@ fn external_host_routes_to_upstream_with_pac_auth() {
 
     match decision {
         RouteDecision::Upstream(up) => {
-            assert_eq!(up.host, "wp8080");
+            assert_eq!(up.host, "proxy.example.com");
             assert_eq!(up.port, 8080);
             assert_eq!(
                 up.auth.mode,
@@ -103,7 +103,7 @@ fn external_host_routes_to_upstream_with_pac_auth() {
 
 #[test]
 fn internal_host_routes_direct_no_auth() {
-    let backend = FakeBackend::classify("wp8080", 8080);
+    let backend = FakeBackend::classify("proxy.example.com", 8080);
     let resolver = RouteResolver::new(pac_negotiate(), backend);
 
     let decision = resolver

@@ -132,7 +132,7 @@
 
 ### Bug Fixes
 
-* **auth:** use NTLM SSPI package for upstream proxy auth (live vs wp8080) ([dd1c3d9](https://github.com/ediiiz/zicade-rs/commit/dd1c3d975fbeadee5d808d8ff6642774d8b48826))
+* **auth:** use NTLM SSPI package for upstream proxy auth (live vs the corporate upstream) ([dd1c3d9](https://github.com/ediiiz/zicade-rs/commit/dd1c3d975fbeadee5d808d8ff6642774d8b48826))
 * end SSE streams on shutdown so graceful shutdown completes ([413767a](https://github.com/ediiiz/zicade-rs/commit/413767a14ecf4b0fd7e6f482b56c83807d2adef0))
 * end SSE streams on shutdown so graceful shutdown completes ([8df7346](https://github.com/ediiiz/zicade-rs/commit/8df73464822b622427414e8c6812777b38901f7b))
 * **m0:** make GNU toolchain self-contained + shared target dir ([2c60ae7](https://github.com/ediiiz/zicade-rs/commit/2c60ae7fe2504b8e65c751d1513c29f87d644f3a))

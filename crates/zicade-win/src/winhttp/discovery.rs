@@ -247,11 +247,11 @@ mod tests {
 
     #[test]
     fn static_resolver_returns_proxy_for_external_host() {
-        let r = StaticResolver::new("wp8080:8080", Some("<local>;*.corp.local"));
+        let r = StaticResolver::new("proxy.example.com:8080", Some("<local>;*.corp.local"));
         assert_eq!(
             r.resolve("https://example.com/"),
             PacResult::Proxy {
-                host: "wp8080".to_owned(),
+                host: "proxy.example.com".to_owned(),
                 port: 8080,
             }
         );
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn static_resolver_bypasses_local_and_wildcard() {
-        let r = StaticResolver::new("wp8080:8080", Some("<local>;*.corp.local"));
+        let r = StaticResolver::new("proxy.example.com:8080", Some("<local>;*.corp.local"));
         // <local>: a dotless host bypasses.
         assert_eq!(r.resolve("http://intranet/"), PacResult::Direct);
         // *.corp.local: a suffix wildcard bypasses.

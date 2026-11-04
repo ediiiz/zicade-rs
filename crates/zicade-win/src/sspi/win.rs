@@ -22,13 +22,14 @@ use crate::WinError;
 /// The SSPI package name (`AcquireCredentialsHandleW`'s `pszpackage`) for the
 /// selected [`SspiPackage`].
 ///
-/// **NTLM** is the default. The corporate McAfee / Skyhigh Secure Web Gateway
-/// offers `Negotiate`, `NTLM`, and `Basic`, but does not accept SPNEGO: sending a
-/// SPNEGO `NegTokenInit` makes it re-offer auth with no continuation token, and
-/// the Negotiate package's raw-NTLM fallback cannot consume the gateway's NTLM
-/// Type-2 challenge (it fails ISC with `SEC_E_INVALID_TOKEN`). The NTLM package
-/// completes the standard three-leg NTLM handshake and the gateway accepts the
-/// resulting token under either the `Negotiate` or `NTLM` scheme label.
+/// **NTLM** is the default. The corporate secure web gateway this was built
+/// against offers `Negotiate`, `NTLM`, and `Basic`, but does not accept SPNEGO:
+/// sending a SPNEGO `NegTokenInit` makes it re-offer auth with no continuation
+/// token, and the Negotiate package's raw-NTLM fallback cannot consume the
+/// gateway's NTLM Type-2 challenge (it fails ISC with `SEC_E_INVALID_TOKEN`).
+/// The NTLM package completes the standard three-leg NTLM handshake and the
+/// gateway accepts the resulting token under either the `Negotiate` or `NTLM`
+/// scheme label.
 /// Environments with a registered Kerberos SPN can select `Negotiate` for SSO.
 fn package_name(package: SspiPackage) -> PCWSTR {
     match package {

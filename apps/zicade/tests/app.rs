@@ -239,7 +239,7 @@ fn build_routing_maps_direct_and_upstream() {
         routing: RoutingConfig {
             mode: RoutingMode::Upstream,
             upstream: Some(UpstreamConfig {
-                host: "wp8080".to_owned(),
+                host: "proxy.example.com".to_owned(),
                 port: 8080,
                 auth: AuthConfig {
                     mode: AuthMode::None,

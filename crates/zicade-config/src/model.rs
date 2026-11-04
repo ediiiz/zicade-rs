@@ -162,7 +162,7 @@ pub struct PacConfig {
 /// When `enabled`, a background monitor inspects the active network adapters'
 /// DNS suffixes; the configured routing (`pac`/`upstream`) applies only while at
 /// least one active suffix matches one of `dns_suffixes` (case-insensitive,
-/// dot-boundary — e.g. `dy.droot.org` matches `droot.org`). Off the corporate
+/// dot-boundary — e.g. `site.ad.example.org` matches `ad.example.org`). Off the corporate
 /// network the proxy routes `Direct`. Defaults to **disabled** so older configs
 /// are unaffected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,7 +171,7 @@ pub struct CorpNetworkConfig {
     #[serde(default)]
     pub enabled: bool,
     /// Corporate DNS suffixes that identify the corporate network, e.g.
-    /// `["droot.org"]`. Required (non-empty) when `enabled`.
+    /// `["ad.example.org"]`. Required (non-empty) when `enabled`.
     #[serde(default, rename = "dnsSuffixes")]
     pub dns_suffixes: Vec<String>,
     /// How often (seconds) to re-check the network as a fallback to change

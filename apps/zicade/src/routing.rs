@@ -115,12 +115,18 @@ mod tests {
             password: Some("secret".to_owned()),
         };
         // Debug never leaks the credential; it just names the scheme.
-        assert_eq!(format!("{:?}", build_auth(&auth, "wp8080")), "Basic");
+        assert_eq!(
+            format!("{:?}", build_auth(&auth, "proxy.example.com")),
+            "Basic"
+        );
     }
 
     #[test]
     fn none_mode_builds_none_upstream_auth() {
         let auth = AuthConfig::default();
-        assert_eq!(format!("{:?}", build_auth(&auth, "wp8080")), "None");
+        assert_eq!(
+            format!("{:?}", build_auth(&auth, "proxy.example.com")),
+            "None"
+        );
     }
 }

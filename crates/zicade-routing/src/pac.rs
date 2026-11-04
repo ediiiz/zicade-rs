@@ -82,15 +82,18 @@ mod tests {
 
     #[test]
     fn malformed_proxy_without_port_is_direct() {
-        assert_eq!(PacResult::parse("PROXY wp8080"), PacResult::Direct);
+        assert_eq!(
+            PacResult::parse("PROXY proxy.example.com"),
+            PacResult::Direct
+        );
     }
 
     #[test]
     fn scheme_prefixed_bare_entry() {
         assert_eq!(
-            PacResult::parse("https=wp8080:8080"),
+            PacResult::parse("https=proxy.example.com:8080"),
             PacResult::Proxy {
-                host: "wp8080".to_owned(),
+                host: "proxy.example.com".to_owned(),
                 port: 8080
             }
         );

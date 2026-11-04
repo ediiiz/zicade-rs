@@ -22,9 +22,11 @@ fn sspi_negotiate_initial_token_gated() {
         return;
     }
 
-    // Derive the SPN host from the same knob the proxy suite uses.
-    let upstream =
-        std::env::var("ZICADE_LIVE_UPSTREAM").unwrap_or_else(|_| "wp8080:8080".to_owned());
+    // Derive the SPN host from the same knob the proxy suite uses. Required: a
+    // placeholder default would exercise an SPN unrelated to the real upstream.
+    let upstream = std::env::var("ZICADE_LIVE_UPSTREAM").expect(
+        "ZICADE_LIVE_PROXY=1 also needs ZICADE_LIVE_UPSTREAM=<host:port> of the real upstream",
+    );
     let host = upstream
         .rsplit_once(':')
         .map_or(upstream.as_str(), |(h, _)| h);
@@ -50,7 +52,7 @@ fn sspi_negotiate_initial_token_gated() {
 fn sspi_negotiate_unsupported_off_windows() {
     use zicade_win::{SspiNegotiate, SspiPackage, WinError};
     assert_eq!(
-        SspiNegotiate::new(Some("HTTP/wp8080"), SspiPackage::Ntlm).err(),
+        SspiNegotiate::new(Some("HTTP/proxy.example.com"), SspiPackage::Ntlm).err(),
         Some(WinError::UnsupportedPlatform)
     );
 }

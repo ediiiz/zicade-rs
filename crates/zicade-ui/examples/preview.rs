@@ -87,7 +87,7 @@ fn sample_connections() -> Vec<ConnectionSnapshot> {
         connection(
             12,
             "teams.microsoft.com:443",
-            "wp8080:8080",
+            "proxy.example.com:8080",
             ConnectionKind::Tunnel,
             ConnectionState::Open,
             412,
@@ -103,7 +103,7 @@ fn sample_connections() -> Vec<ConnectionSnapshot> {
         connection(
             10,
             "outlook.office365.com:443",
-            "wp8080:8080",
+            "proxy.example.com:8080",
             ConnectionKind::Tunnel,
             ConnectionState::Open,
             1_830,
@@ -127,7 +127,7 @@ fn sample_connections() -> Vec<ConnectionSnapshot> {
         connection(
             7,
             "static.example.net:443",
-            "wp8080:8080",
+            "proxy.example.com:8080",
             ConnectionKind::Tunnel,
             ConnectionState::Failed("upstream CONNECT failed: 407 after 3 legs".to_owned()),
             2,
@@ -143,7 +143,7 @@ fn sample_connections() -> Vec<ConnectionSnapshot> {
         connection(
             5,
             "api.example.com:443",
-            "wp8080:8080",
+            "proxy.example.com:8080",
             ConnectionKind::Tunnel,
             ConnectionState::Closed,
             64,

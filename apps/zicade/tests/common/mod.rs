@@ -27,8 +27,13 @@ fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_owned())
 }
 
+/// The real upstream `host:port` from `ZICADE_LIVE_UPSTREAM`. Required once the
+/// gate is on: there is no default, because a placeholder host would turn a
+/// misconfigured run into a confusing network failure instead of a clear one.
 pub fn upstream() -> String {
-    env_or("ZICADE_LIVE_UPSTREAM", "wp8080:8080")
+    std::env::var("ZICADE_LIVE_UPSTREAM").unwrap_or_else(|_| {
+        panic!("{GATE}=1 also needs ZICADE_LIVE_UPSTREAM=<host:port> of the real upstream")
+    })
 }
 
 pub fn external_host() -> String {

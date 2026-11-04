@@ -183,7 +183,7 @@ mod tests {
         // on this box (NTLM is always present; Negotiate is too on a domain box
         // and standalone). Models `sspi_negotiate_links_and_acquires`.
         for pkg in [SspiPackage::Ntlm, SspiPackage::Negotiate] {
-            SspiNegotiate::new(Some("HTTP/wp8080"), pkg)
+            SspiNegotiate::new(Some("HTTP/proxy.example.com"), pkg)
                 .unwrap_or_else(|e| panic!("acquire {pkg:?} credential handle: {e}"));
         }
     }

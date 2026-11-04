@@ -12,7 +12,7 @@ const FULL_EXAMPLE: &str = r#"{
   "listen":  { "host": "127.0.0.1", "port": 3129 },
   "routing": {
     "mode": "pac",
-    "upstream": { "host": "wp8080", "port": 8080,
+    "upstream": { "host": "proxy.example.com", "port": 8080,
                   "auth": { "mode": "negotiate" } },
     "pac":      { "source": "auto",
                   "path": null, "url": null,
@@ -36,7 +36,7 @@ fn parses_full_example_schema() {
     assert_eq!(cfg.routing.mode, RoutingMode::Pac);
 
     let up = cfg.routing.upstream.as_ref().expect("upstream present");
-    assert_eq!(up.host, "wp8080");
+    assert_eq!(up.host, "proxy.example.com");
     assert_eq!(up.port, 8080);
     assert_eq!(up.auth.mode, AuthMode::Negotiate);
 
@@ -62,7 +62,7 @@ fn upstream_auth_json(auth_fields: &str) -> String {
     format!(
         r#"{{ "listen": {{ "host": "127.0.0.1", "port": 3129 }},
               "routing": {{ "mode": "upstream",
-                            "upstream": {{ "host": "wp8080", "port": 8080,
+                            "upstream": {{ "host": "proxy.example.com", "port": 8080,
                                           "auth": {{ "mode": "negotiate"{auth_fields} }} }} }} }}"#
     )
 }
@@ -115,7 +115,7 @@ fn basic_auth_json(auth_fields: &str) -> String {
     format!(
         r#"{{ "listen": {{ "host": "127.0.0.1", "port": 3129 }},
               "routing": {{ "mode": "upstream",
-                            "upstream": {{ "host": "wp8080", "port": 8080,
+                            "upstream": {{ "host": "proxy.example.com", "port": 8080,
                                           "auth": {{ "mode": "basic"{auth_fields} }} }} }} }}"#
     )
 }

@@ -19,7 +19,7 @@ pub(crate) use gate::{NetworkGate, gate_enabled};
 ///
 /// Matching is case-insensitive and dot-boundary aware: an active suffix matches
 /// a configured suffix `c` when it equals `c` or ends with `.c` (so
-/// `dy.droot.org` matches `droot.org`, but `notdroot.org` does not). Leading and
+/// `site.ad.example.org` matches `ad.example.org`, but `notad.example.org` does not). Leading and
 /// trailing dots and surrounding whitespace are ignored on both sides; empty
 /// entries never match.
 pub(crate) fn on_corp(active: &[String], configured: &[String]) -> bool {
@@ -55,46 +55,61 @@ mod tests {
 
     #[test]
     fn exact_suffix_matches() {
-        assert!(on_corp(&v(&["droot.org"]), &v(&["droot.org"])));
+        assert!(on_corp(&v(&["ad.example.org"]), &v(&["ad.example.org"])));
     }
 
     #[test]
     fn subdomain_matches_on_dot_boundary() {
-        assert!(on_corp(&v(&["dy.droot.org"]), &v(&["droot.org"])));
+        assert!(on_corp(
+            &v(&["site.ad.example.org"]),
+            &v(&["ad.example.org"])
+        ));
     }
 
     #[test]
     fn is_case_insensitive() {
-        assert!(on_corp(&v(&["DY.DRoot.Org"]), &v(&["droot.org"])));
+        assert!(on_corp(
+            &v(&["SITE.AD.Example.Org"]),
+            &v(&["ad.example.org"])
+        ));
     }
 
     #[test]
     fn ignores_leading_dots_and_whitespace() {
-        assert!(on_corp(&v(&["  .dy.droot.org. "]), &v(&[" .droot.org "])));
+        assert!(on_corp(
+            &v(&["  .site.ad.example.org. "]),
+            &v(&[" .ad.example.org "])
+        ));
     }
 
     #[test]
     fn non_dot_boundary_does_not_match() {
-        // "notdroot.org" must NOT be treated as inside "droot.org".
-        assert!(!on_corp(&v(&["notdroot.org"]), &v(&["droot.org"])));
+        // "notad.example.org" must NOT be treated as inside "ad.example.org".
+        assert!(!on_corp(
+            &v(&["notad.example.org"]),
+            &v(&["ad.example.org"])
+        ));
     }
 
     #[test]
     fn no_active_suffix_is_off_corp() {
-        assert!(!on_corp(&[], &v(&["droot.org"])));
+        assert!(!on_corp(&[], &v(&["ad.example.org"])));
     }
 
     #[test]
     fn empty_configured_is_off_corp() {
         // A misconfigured/empty suffix list never reports on-corp.
-        assert!(!on_corp(&v(&["dy.droot.org"]), &[]));
-        assert!(!on_corp(&v(&["dy.droot.org"]), &v(&["", "  "])));
+        assert!(!on_corp(&v(&["site.ad.example.org"]), &[]));
+        assert!(!on_corp(&v(&["site.ad.example.org"]), &v(&["", "  "])));
     }
 
     #[test]
     fn matches_any_of_several_configured() {
-        let configured = v(&["corp.example", "droot.org"]);
-        assert!(on_corp(&v(&["home.lan", "dy.droot.org"]), &configured));
+        let configured = v(&["corp.example", "ad.example.org"]);
+        assert!(on_corp(
+            &v(&["home.lan", "site.ad.example.org"]),
+            &configured
+        ));
         assert!(!on_corp(&v(&["home.lan", "guest.wifi"]), &configured));
     }
 }
