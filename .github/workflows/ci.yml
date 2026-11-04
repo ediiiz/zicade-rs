@@ -1,15 +1,24 @@
 name: ci
 
-# Gate every PR (and pushes to main) on formatting, lints, tests, and a binary
-# build. Like the release job, CI builds with the MSVC toolchain preinstalled on
-# windows-latest; `--target` names it explicitly so the job never depends on the
-# runner's default host triple. The crates are Windows-only (windows-crate FFI),
-# so all jobs run on Windows.
+# Gate every PR (and pushes to main) on formatting, lints, tests, and the
+# binary build. Like the release job, CI builds with the MSVC toolchain
+# preinstalled on windows-latest; `--target` names it explicitly so the job
+# never depends on the runner's default host triple. The crates are
+# Windows-only (windows-crate FFI), so all jobs run on Windows.
 
+# Docs-only changes cannot affect the build, so they skip the ~5 min Windows job.
 on:
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE*"
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE*"
 
 permissions:
   contents: read
@@ -20,6 +29,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Drop the per-crate "Compiling"/"Checking" lines; warnings, errors, and test
+  # failures still print.
+  CARGO_TERM_QUIET: "true"
   CARGO_INCREMENTAL: "0"
   TARGET: x86_64-pc-windows-msvc
 
@@ -37,6 +49,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: msvc
+          # Only main saves the ~1 GB cache; PRs restore it. Per-PR caches
+          # otherwise pile up against the repository's cache quota.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Format
         shell: bash
@@ -56,10 +71,8 @@ jobs:
         shell: bash
         run: bash scripts/check_file_size.sh
 
+      # `apps/zicade` has integration tests, so this also builds the `zicade`
+      # binary (and with it the app-icon embed); no separate build step needed.
       - name: Test
         shell: bash
         run: cargo test --workspace --locked --target "$TARGET"
-
-      - name: Build binary (verifies the app-icon embed)
-        shell: bash
-        run: cargo build -p zicade --target "$TARGET"

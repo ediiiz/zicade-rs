@@ -21,6 +21,7 @@ async fn proxy_for(upstream: &SchemeUpstream) -> TestProxy {
     TestProxy::spawn_with_routing(Routing::Upstream(UpstreamTarget {
         addr: upstream.addr.to_string(),
         auth: challenge_checking_factory(),
+        pool: None,
     }))
     .await
 }
