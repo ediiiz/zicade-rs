@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/ediiiz/zicade-rs/compare/v0.4.1...v0.5.0) (2026-11-04)
+
+
+### Features
+
+* **proxy:** opt-in prewarmed upstream sockets for CONNECT ([#25](https://github.com/ediiiz/zicade-rs/issues/25)) ([16462ac](https://github.com/ediiiz/zicade-rs/commit/16462acf96861c3bf7b1d79a9a4b8a93cc4555b4))
+
+
+### Bug Fixes
+
+* **auth:** honour the gateway's advertised scheme (NTLM vs Negotiate) ([#22](https://github.com/ediiiz/zicade-rs/issues/22)) ([7e45a06](https://github.com/ediiiz/zicade-rs/commit/7e45a06098d1cae7586989667ac429cf9760d5dd))
+* restore the main build; reduce CI volume ([#26](https://github.com/ediiiz/zicade-rs/issues/26)) ([a564e2c](https://github.com/ediiiz/zicade-rs/commit/a564e2cea7b68689cd75dc57078b9fb924dda5a3))
+
+
+### Build System
+
+* portable cargo config and placeholder network names ([#24](https://github.com/ediiiz/zicade-rs/issues/24)) ([ac336cd](https://github.com/ediiiz/zicade-rs/commit/ac336cd995d5a0f3a0406f0ef9efc9b026578581))
+
 ## [0.4.1](https://github.com/ediiiz/zicade-rs/compare/v0.4.0...v0.4.1) (2026-10-20)
 
 
