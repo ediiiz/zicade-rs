@@ -1,24 +1,23 @@
 //! Proxy-auth header parsing and building for the Negotiate/NTLM schemes.
 //!
-//! Many corporate gateways advertise the SPNEGO-capable NTLM scheme simply as
-//! `Proxy-Authenticate: NTLM` rather than `Negotiate`, and accept only
-//! `Proxy-Authorization: NTLM <token>` in return. Both spellings carry the same
-//! SSPI tokens, so the scheme is tracked across the handshake instead of being
-//! hard-coded.
+//! Some gateways advertise connection auth as `Proxy-Authenticate: NTLM` rather
+//! than `Negotiate`, and reject a reply under any keyword but the one they
+//! advertised. The keyword is therefore carried with the handshake instead of
+//! being hard-coded.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
 /// Which proxy-auth scheme the upstream gateway is speaking.
 ///
-/// Only the keyword written into the `Proxy-Authorization` header differs; the
-/// SSPI tokens are identical for both.
+/// It decides the keyword written into `Proxy-Authorization`. A raw NTLM token
+/// is accepted under either keyword; a SPNEGO token only under `Negotiate`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuthScheme {
     /// `Proxy-Authenticate: Negotiate` (RFC 4559 spelling).
     #[default]
     Negotiate,
-    /// `Proxy-Authenticate: NTLM` (common on security-gateway appliances).
+    /// `Proxy-Authenticate: NTLM`.
     Ntlm,
 }
 
